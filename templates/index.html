@@ -1,0 +1,76 @@
+<!-- templates/index.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Don't Push the Button - Aiven for Apache Kafka Workshop</title>
+    <!-- HTMX for seamless interactions -->
+    <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .fade-in {
+        animation: fadeIn 1.0s;
+      }
+      @keyframes fadeIn {
+        0% {
+          opacity: 0;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="fade-in bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+      <div class="flex flex-col items-center">
+        <!-- Button with HTMX attributes -->
+        <button
+          class="bg-rose-600 text-white font-semibold py-6 px-6 rounded-2xl transition-colors shadow-xl"
+          hx-post="/send-ip"
+          hx-trigger="click"
+          hx-target="#result"
+          hx-swap="innerHTML"
+          hx-indicator="#loading"
+          id="result"
+        >
+          {% include "partials/button_text.html" %}
+        </button>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="htmx-indicator mt-4">
+          <div class="flex items-center justify-center">
+            <svg
+              class="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            <span>Processing...</span>
+          </div>
+        </div>
+
+      <div
+        class="mt-8 pt-4 border-t border-gray-200 text-center text-xs text-gray-500"
+      >
+        <p>FastAPI + HTMX + Kafka Demo</p>
+      </div>
+    </div>
+  </body>
+</html>
