@@ -1,3 +1,6 @@
+# Kafka certification files
+certs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
