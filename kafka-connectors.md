@@ -221,3 +221,9 @@ least for the moment.
     --local-retention-ms 5000
 ```
 
+
+## Fake data script 2
+
+The script now uses `aiokafka` to generate button presses for a single web
+page interaction. And the messages get into the topic, and tiered storage is
+being used.

@@ -16,6 +16,8 @@ from uuid import UUID, uuid4
 
 import dotenv
 
+from aiokafka import AIOKafkaProducer
+from aiokafka.helpers import create_ssl_context
 from geoip2fast import GeoIP2Fast
 from geoip2fast.geoip2fast import GeoIPError
 from pydantic import BaseModel
@@ -39,6 +41,13 @@ dotenv.load_dotenv()
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
 
+# The following should really be able to be overridden at the command line
+DEFAULT_CERTS_FOLDER = pathlib.Path("certs")
+CERTS_FOLDER = DEFAULT_CERTS_FOLDER
+KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
+TOPIC_NAME = os.getenv("KAFKA_BUTTON_TOPIC", "button_presses")
+
+
 try:
     geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
 except Exception:
@@ -53,21 +62,6 @@ except Exception:
 
 print('Database info:')
 pprint.pp(geoip.get_database_info())
-
-if False:
-    certs_folder = pathlib.Path("certs")
-
-    KAFKA_BOOTSTRAP_SERVER = os.getenv("AIVEN_KAFKA_SERVICE_ENDPOINT_URI", "localhost:9093")
-    ssl_context = create_ssl_context(
-        cafile=certs_folder / "ca.pem",
-        certfile=certs_folder / "service.cert",
-        keyfile=certs_folder / "service.key",
-    )
-
-    producer = AIOKafkaProducer(
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVER,
-        ssl_context=ssl_context,
-    )
 
 
 class Action(StrEnum):
@@ -160,16 +154,40 @@ def generate_session() -> Iterator[Event]:
 
 
 
+
 async def send_messages_to_kafka():
-    pass
+    ssl_context = create_ssl_context(
+        cafile=CERTS_FOLDER / "ca.pem",
+        certfile=CERTS_FOLDER / "service.cert",
+        keyfile=CERTS_FOLDER / "service.key",
+    )
+
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_SERVICE_URI,
+        security_protocol="SSL",
+        ssl_context=ssl_context,
+    )
+
+    await producer.start()
+
+    try:
+        for event in generate_session():
+            # Convert our event to a JSON string, and then make sure it's UTF-8.
+            # Given we're using country and city names, this feels safer than 'ascii'.
+            # We *could* instead specify a `value_serializer` parameter to AIOKafkaProducer
+            message = event.model_dump_json().encode('utf-8')
+            print(f'EVENT {message}')
+            # For the moment, don't let it buffer messages
+            await producer.send_and_wait(TOPIC_NAME, message)
+    finally:
+        await producer.stop()
+
 
 def main():
-    #with asyncio.Runner() as runner:
-    #    runner.run(send_messages_to_kafka)
+    with asyncio.Runner() as runner:
+        runner.run(send_messages_to_kafka())
 
 
-    for event in generate_session():
-        print(f'EVENT {event}')
 
 
 if __name__ == '__main__':
