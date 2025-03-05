@@ -1,3 +1,4 @@
 fastapi[standard]
 aiokafka
 python_dotenv
+geoip2fast
