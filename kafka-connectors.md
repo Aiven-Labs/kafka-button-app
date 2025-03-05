@@ -111,7 +111,113 @@ INFO:root:Press 6 at 1741191683.503385
 
 For the moment, I'm going to do things with the `avn` command
 
-```
-python -m venv venv
+I already did the following in the previous section
 
 ```
+; python -m venv venv
+; source venv/bin/activate.fish    # why yes, I use the fish shell
+; pip install -r requirements.txt
+```
+
+Make sure I have `avn`, and upgrade it if necessary
+```
+; pip install -U aiven_client
+```
+
+Get a token from the Aiven console and log in
+```
+; avn user login tony.ibbs@aiven.io --token
+```
+
+I don't want to have to specify `--project devrel-tibs` on every `avn` command:
+```
+; avn project switch devrel-tibs
+```
+
+Let's decide on a servicen name (again, fish shell)
+```
+set -x KAFKA_SERVICE_NAME tibs-button-kafka
+```
+
+Create my Kafka service.
+* `google-europe-west1` has tierd storage available, which I will care about
+  in a moment.
+* We need at least `business-4` because we want integrations later on.
+* I'm going to create my topic explicitly, but I normally use
+  `--kafka.auto_create_topics_enable=true` for testing / demo purposes, as it
+  can be useful. Of course, it's not a good idea in production.
+
+```
+; avn service create $KAFKA_SERVICE_NAME          \
+          --service-type kafka                    \
+          --cloud google-europe-west1             \
+          --plan business-4                       \
+          -c kafka_connect=true                   \
+          -c schema_registry=true                 \
+          -c kafka.auto_create_topics_enable=true
+```
+
+We may need the actual service URI later on - let's get it (still fish)
+```
+; set -x KAFKA_SERVICE_URI (avn service get $KAFKA_SERVICE_NAME --format '{service_uri}')
+```
+
+Check if it's running
+```
+; avn service get $KAFKA_SERVICE_NAME
+```
+
+and/or
+```
+; avn service wait $KAFKA_SERVICE_NAME
+```
+
+And download the certification files (it will create the directory if necessary)
+```
+; avn service user-creds-download $KAFKA_SERVICE_NAME --username avnadmin -d certs
+```
+
+```
+; ls certs
+ca.pem  service.cert  service.key
+```
+
+Now for our topic.
+```
+; set -x KAFKA_BUTTON_TOPIC button_presses
+```
+
+Note that we must specify `--partitions` and `--replication`
+```
+; avn service topic-create  \
+    --partitions 3          \
+    --replication 2         \
+    $KAFKA_SERVICE_NAME $KAFKA_BUTTON_TOPIC
+{'message': 'created'}
+```
+
+We can always increase the number of partitions later on.
+
+We know we're going to want tiered storage for our topic, so we need to enable
+it for this service
+```
+; avn service update                  \
+     $KAFKA_SERVICE_NAME              \
+     -c tiered_storage.enabled=true
+```
+
+and then we can set it up for this topic (we could also have done this when we
+*created* the topic, using the same `--remote-storage-enable` switch).
+
+Because we're doing a demo, we want a short retention time, even though this
+may cause inefficient use of the tiered storage (if we aren't sending a
+significant number of messages). We'll choose a retention time of 5s (5,000 milliseconds), at
+least for the moment.
+```
+; avn service topic-update \
+    --service-name $KAFKA_SERVICE_NAME \
+    --topic $KAFKA_BUTTON_TOPIC        \
+    --remote-storage-enable            \
+    --local-retention-ms 5000
+```
+

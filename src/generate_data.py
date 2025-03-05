@@ -2,12 +2,16 @@
 
 """Generate fake data."""
 
-import pathlib
-import os
+import asyncio
 import datetime
 import logging
+import os
+import pathlib
 import pprint
 import random
+
+from enum import StrEnum
+from typing import Iterator, Optional
 from uuid import UUID, uuid4
 
 import dotenv
@@ -66,24 +70,38 @@ if False:
     )
 
 
-    class ClickInteraction(BaseModel):
-        ip_address: str
-        timestamp: datetime.datetime
-        country: Optional[str] = None
-        longitude: float = 0.0
-        latitude: float = 0.0
-        session: UUID = session
+class Action(StrEnum):
+    ENTER_PAGE = 'EnterPage'
+    PRESS_BUTTON = 'PressButton'
+    EXIT_PAGE = 'ExitPage'
 
 
-def generate_session():
+
+class Event(BaseModel):
+    session_id: UUID
+    timestamp: float
+    action: str
+    country_name: str
+    country_code: str
+    subdivision_name: Optional[str] = None
+    subdivision_code: Optional[str] = None
+    city_name: Optional[str] = None
+
+
+def generate_session() -> Iterator[Event]:
+    """Yield button press message tuples from a single web app "session"
+
+    Note we do *not* expose the IP address, as that counts as personal information.
+    If we don't yield it in our datastructure, then there's no way we can leak it.
+    """
     # I can't see a way of getting the lat, long for a city without using an internet
     # connection, so let's not do that, at least for the moment. The consumer end can
     # worry about that.
 
     session_id = uuid4()
     logging.info(f'Session {session_id}')
-    # Luckily we're not trying to be especially random, so this is good enough
-    number_presses = random.randint(1, 10)
+    # Our base time is NOW as a floating Unix timestamp, seconds since the epoch
+    timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
 
     if random.randint(1,3) == 3:    # or some other distribution
         #ip_address = fake.ipv6()
@@ -102,21 +120,56 @@ def generate_session():
     country_name = geoip_data.country_name
     country_code = geoip_data.country_code
     city_name = geoip_data.city.name
-    city_subdivision_name = geoip_data.city.subdivision_name
-    city_subdivision_code = geoip_data.city.subdivision_code
-    logging.info(f'IP {ip_address} -> {country_name}, {country_code} ({city_name}, {city_subdivision_name}, {city_subdivision_code}')
+    subdivision_name = geoip_data.city.subdivision_name
+    subdivision_code = geoip_data.city.subdivision_code
+    logging.info(f'IP {ip_address} -> {country_name}, {country_code} ({city_name}, {subdivision_name}, {subdivision_code}')
 
     print(geoip_data.pp_json())
 
-    # Our base time is NOW as a floating Unix timestamp, seconds since the epoch
-    timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    # Most of our data stays the same, so we can handily use a dictionary
+    data = {
+        'session_id': session_id,
+        'timestamp': timestamp,
+        'action': str(Action.ENTER_PAGE),
+        'country_name': country_name,
+        'country_code': country_code,
+        'subdivision_name': subdivision_name,
+        'subdivision_code': subdivision_code,
+        'city_name': city_name,
+    }
+
+    yield Event(**data)
+
+    # Luckily we're not trying to be especially random, so this is good enough
+    number_presses = random.randint(1, 10)
+    data['action'] = str(Action.PRESS_BUTTON)
     for press in range(number_presses):
         # Pretend we have elapsed time between button presses
         timestamp += random.randint(500, 5000)
         logging.info(f'Press {press} at {timestamp}')
 
+        data['timestamp'] = timestamp
+        yield Event(**data)
+
+    timestamp += random.randint(500, 5000)
+    logging.info(f'Leave page at {timestamp}')
+
+    data['timestamp'] = timestamp
+    data['action'] = str(Action.EXIT_PAGE)
+    yield Event(**data)
+
+
+
+async def send_messages_to_kafka():
+    pass
+
 def main():
-    generate_session()
+    #with asyncio.Runner() as runner:
+    #    runner.run(send_messages_to_kafka)
+
+
+    for event in generate_session():
+        print(f'EVENT {event}')
 
 
 if __name__ == '__main__':
