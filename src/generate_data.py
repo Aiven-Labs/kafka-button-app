@@ -5,17 +5,21 @@
 import argparse
 import asyncio
 import datetime
+import io
 import logging
 import os
 import pathlib
 import pprint
 import random
+import struct
 
 from enum import StrEnum
 from typing import Iterator, Optional
 from uuid import UUID, uuid4
 
+import avro
 import dotenv
+import httpx
 
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
@@ -37,38 +41,26 @@ from pydantic import BaseModel
 #fake.add_provider(internet)
 
 logging.basicConfig(level=logging.INFO)
-dotenv.load_dotenv()
 
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
 
+# Command line default values
 DEFAULT_CERTS_FOLDER = "certs"
-DEFAULT_TOPIC_NAME = "button_presses"
+# Allow setting these defaults via a `.env` file as well
+dotenv.load_dotenv()
 KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
-
-try:
-    geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
-except Exception:
-    # Download the city data
-    # We DO NOT want to do this in a web application! In that situation, we should download
-    # the file separately from the release directory - so getting
-    # https://github.com/rabuchaim/geoip2fast/releases/download/LATEST/geoip2fast-city-asn-ipv6.dat.gz
-    logging.info('Downloading city IP data')
-    G = GeoIP2Fast()
-    G.update_file(GEOIP_DATASET_FILENAME)
-    geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
-
-print('Database info:')
-pprint.pp(geoip.get_database_info())
+# Note that Avro schema names don't allow hyphens, and the JDBC connector
+# (at least by default) wants the topic name and schema name to match
+TOPIC_NAME = "button_presses"
 
 
 class Action(StrEnum):
     ENTER_PAGE = 'EnterPage'
     PRESS_BUTTON = 'PressButton'
     EXIT_PAGE = 'ExitPage'
-
 
 
 class Event(BaseModel):
@@ -80,6 +72,84 @@ class Event(BaseModel):
     subdivision_name: Optional[str] = None
     subdivision_code: Optional[str] = None
     city_name: Optional[str] = None
+
+
+# REMEMBER to double check that the optional fields work as we expect
+AVRO_SCHEMA = {
+    'doc': 'Web app interactions',
+    'name': TOPIC_NAME,
+    'type': 'record',
+    'fields': [
+        {'name': 'session_id', 'type': 'string'},
+        {'name': 'timestamp', 'type': 'long'},
+        {'name': 'action', 'type': 'string'},
+        {'name': 'country_name', 'type': 'string'},
+        {'name': 'country_code', 'type': 'string'},
+        {'name': 'subdivision_name', 'type': ['null', 'string'], 'default': null},
+        {'name': 'subdivision_code', 'type': ['null', 'string'], 'default': null},
+        {'name': 'city_name', 'type': ['null', 'string'], 'default': null},
+    ],
+}
+
+
+# Parsing the schema both validates it, and also puts it into a form that
+# can be used when envoding/decoding message data
+PARSED_SCHEMA = avro.schema.parse(AVRO_SCHEMA_AS_STR)
+
+
+def register_schema(schema_uri):
+    """Register our schema with Karapace.
+
+    Returns the schema id, which gets embedded into the messages.
+    """
+    r = httpx.post(
+        f'{schema_uri}/subjects/{TOPIC_NAME}-value/versions',
+        json={"schema": AVRO_SCHEMA_AS_STR}
+    )
+    r.raise_for_status()
+
+    logging.info(f'Registered schema {r} {r.text=} {r.json()=}')
+    response_json = r.json()
+    return response_json['id']
+
+
+def make_avro_payload(message: str, schema_id: int) -> bytes:
+    """Given a JSON string message, and a schema id, return an Avro payload.
+    """
+    # The Avro encoder works by writing to a "file like" object,
+    # so we shall use a BytesIO instance.
+    writer = avro.io.DatumWriter(PARSED_SCHEMA)
+    byte_data = io.BytesIO()
+
+    # The JDBC Connector needs us to put the schema id on the front of each Avro message.
+    # We need to prepend a 0 byte and then the schema id as a 4 byte value.
+    # We'll just do this by hand using the Python `struct` library.
+    header = struct.pack('>bI', 0, self.schema_id)
+    byte_data.write(header)
+
+    # And then we add the actual data
+    encoder = avro.io.BinaryEncoder(byte_data)
+    writer.write(order, encoder)
+    raw_bytes = byte_data.getvalue()
+
+    return raw_bytes
+
+
+def load_geoip_data():
+    try:
+        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
+    except Exception:
+        # Download the city data
+        # We DO NOT want to do this in a web application! In that situation, we should download
+        # the file separately from the release directory - so getting
+        # https://github.com/rabuchaim/geoip2fast/releases/download/LATEST/geoip2fast-city-asn-ipv6.dat.gz
+        logging.info('Downloading city IP data')
+        G = GeoIP2Fast()
+        G.update_file(GEOIP_DATASET_FILENAME)
+        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
+
+    print('Database info:')
+    pprint.pp(geoip.get_database_info())
 
 
 def generate_session() -> Iterator[Event]:
@@ -153,13 +223,11 @@ def generate_session() -> Iterator[Event]:
     yield Event(**data)
 
 
-
-
 async def send_messages_to_kafka(
         kafka_uri: str,
         topic_name: str,
         certs_dir: pathlib.Path,
-        schema_uri: str,
+        schema_id: int,
 ):
     ssl_context = create_ssl_context(
         cafile=certs_dir / "ca.pem",
@@ -182,8 +250,9 @@ async def send_messages_to_kafka(
             # We *could* instead specify a `value_serializer` parameter to AIOKafkaProducer
             message = event.model_dump_json().encode('utf-8')
             print(f'EVENT {message}')
+            raw_bytes = make_avro_payload(message, schema_id)
             # For the moment, don't let it buffer messages
-            await producer.send_and_wait(topic_name, message)
+            await producer.send_and_wait(topic_name, raw_bytes)
     finally:
         await producer.stop()
 
@@ -229,9 +298,13 @@ def main():
         logging.error('Set SCHEMA_REGISTRY_URI or use the -s switch')
         return -1
 
+    load_geoip_data()
+
+    schema_id = register_schema(args.schema_uri)
+
     with asyncio.Runner() as runner:
         runner.run(send_messages_to_kafka(
-            args.kafka_uri, args.topic, args.certs_dir, args.schema_uri,
+            args.kafka_uri, args.topic, args.certs_dir, schema_id,
             ),
         )
 

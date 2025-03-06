@@ -239,3 +239,60 @@ Let's not waste resources
 ```
 ; avn service update $KAFKA_SERVICE_NAME --power-off
 ```
+
+## Changing to Avro messages
+
+If we're going to sink to PG with a JDBC connector, then our messages need to
+contain schema information.
+
+If we stick with JSON messages, then *every message* will need to have a JSON
+schema attached to it, which is quite wasteful.
+
+So instead we shall change to using Avro, and then we just need to send the
+schema id (plus a byte...)
+
+> **Note** lots of inspiration taken from the code in
+> https://github.com/Aiven-Labs/fish-and-chips-and-kafka/tree/main/src
+> which addresses this exact thing in demo 6 (in the "homework" section)
+
+## Let's sink!
+
+Remembering our Avro schema:
+
+```
+# REMEMBER to double check that the optional fields work as we expect
+AVRO_SCHEMA = {
+    'doc': 'Web app interactions',
+    'name': TOPIC_NAME,
+    'type': 'record',
+    'fields': [
+        {'name': 'session_id', 'type': 'string'},
+        {'name': 'timestamp', 'type': 'long'},
+        {'name': 'action', 'type': 'string'},
+        {'name': 'country_name', 'type': 'string'},
+        {'name': 'country_code', 'type': 'string'},
+        {'name': 'subdivision_name', 'type': ['null', 'string'], 'default': null},
+        {'name': 'subdivision_code', 'type': ['null', 'string'], 'default': null},
+        {'name': 'city_name', 'type': ['null', 'string'], 'default': null},
+    ],
+}
+```
+
+We need to create the target database, preferably in the same region.
+
+```
+set -x PG_SERVICE_NAME tibs-button-pg
+```
+
+A basic sort of plan should do
+```
+; avn service create $PG_SERVICE_NAME             \
+          --service-type pg                       \
+          --cloud google-europe-west1             \
+          --plan hobbyist
+```
+
+and we can use our friendly wait command
+```
+avn service wait $PG_SERVICE_NAME
+```
