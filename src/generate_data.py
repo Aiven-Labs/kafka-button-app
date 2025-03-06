@@ -65,7 +65,7 @@ class Action(StrEnum):
 
 class Event(BaseModel):
     session_id: UUID
-    timestamp: float
+    timestamp: str
     action: str
     country_name: str
     country_code: str
@@ -81,12 +81,12 @@ AVRO_SCHEMA = {
     'type': 'record',
     'fields': [
         {'name': 'session_id', 'type': 'string'},
-        {'name': 'timestamp', 'type': 'long'},
+        {'name': 'timestamp', 'type': 'string'},
         {'name': 'action', 'type': 'string'},
         {'name': 'country_name', 'type': 'string'},
         {'name': 'country_code', 'type': 'string'},
-        {'name': 'subdivision_name', 'type': ['null', 'string'], 'default': null},
-        {'name': 'subdivision_code', 'type': ['null', 'string'], 'default': null},
+        {'name': 'subdivision_name', 'type': ['null', 'string'], 'default': None},
+        {'name': 'subdivision_code', 'type': ['null', 'string'], 'default': None},
         {'name': 'city_name', 'type': ['null', 'string'], 'default': null},
     ],
 }
@@ -164,8 +164,16 @@ def generate_session() -> Iterator[Event]:
 
     session_id = uuid4()
     logging.info(f'Session {session_id}')
-    # Our base time is NOW as a floating Unix timestamp, seconds since the epoch
-    timestamp = datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+    # Our "now" in UTC
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    # We'll represent this in messages using the standard ISO format, because
+    # that's the most unabmiguous way of doing it, even if it's longer than,
+    # for instance, a Unix timestamp. It makes it very clear what timezone
+    # the timestamp is in, and also doesn't require people to figure out
+    # whether they've got seconds or milliseconds or microseconds since
+    # the epoch.
 
     if random.randint(1,3) == 3:    # or some other distribution
         #ip_address = fake.ipv6()
@@ -193,7 +201,7 @@ def generate_session() -> Iterator[Event]:
     # Most of our data stays the same, so we can handily use a dictionary
     data = {
         'session_id': session_id,
-        'timestamp': timestamp,
+        'timestamp': now.isoformat(),
         'action': str(Action.ENTER_PAGE),
         'country_name': country_name,
         'country_code': country_code,
@@ -209,16 +217,16 @@ def generate_session() -> Iterator[Event]:
     data['action'] = str(Action.PRESS_BUTTON)
     for press in range(number_presses):
         # Pretend we have elapsed time between button presses
-        timestamp += random.randint(500, 5000)
-        logging.info(f'Press {press} at {timestamp}')
+        now += datetime.timedelta(milliseconds=random.randint(500, 5000))
+        logging.info(f'Press {press} at {now}')
 
-        data['timestamp'] = timestamp
+        data['timestamp'] = now.isoformat()
         yield Event(**data)
 
-    timestamp += random.randint(500, 5000)
-    logging.info(f'Leave page at {timestamp}')
+    now += datetime.timedelta(milliseconds=random.randint(500, 5000))
+    logging.info(f'Leave page at {now}')
 
-    data['timestamp'] = timestamp
+    data['timestamp'] = now.isoformat()
     data['action'] = str(Action.EXIT_PAGE)
     yield Event(**data)
 
