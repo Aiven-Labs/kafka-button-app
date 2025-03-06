@@ -2,6 +2,7 @@
 
 """Generate fake data."""
 
+import argparse
 import asyncio
 import datetime
 import logging
@@ -41,11 +42,10 @@ dotenv.load_dotenv()
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
 
-# The following should really be able to be overridden at the command line
-DEFAULT_CERTS_FOLDER = pathlib.Path("certs")
-CERTS_FOLDER = DEFAULT_CERTS_FOLDER
+DEFAULT_CERTS_FOLDER = "certs"
+DEFAULT_TOPIC_NAME = "button_presses"
 KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
-TOPIC_NAME = os.getenv("KAFKA_BUTTON_TOPIC", "button_presses")
+SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 
 try:
@@ -155,15 +155,20 @@ def generate_session() -> Iterator[Event]:
 
 
 
-async def send_messages_to_kafka():
+async def send_messages_to_kafka(
+        kafka_uri: str,
+        topic_name: str,
+        certs_dir: pathlib.Path,
+        schema_uri: str,
+):
     ssl_context = create_ssl_context(
-        cafile=CERTS_FOLDER / "ca.pem",
-        certfile=CERTS_FOLDER / "service.cert",
-        keyfile=CERTS_FOLDER / "service.key",
+        cafile=certs_dir / "ca.pem",
+        certfile=certs_dir / "service.cert",
+        keyfile=certs_dir / "service.key",
     )
 
     producer = AIOKafkaProducer(
-        bootstrap_servers=KAFKA_SERVICE_URI,
+        bootstrap_servers=kafka_uri,
         security_protocol="SSL",
         ssl_context=ssl_context,
     )
@@ -178,14 +183,57 @@ async def send_messages_to_kafka():
             message = event.model_dump_json().encode('utf-8')
             print(f'EVENT {message}')
             # For the moment, don't let it buffer messages
-            await producer.send_and_wait(TOPIC_NAME, message)
+            await producer.send_and_wait(topic_name, message)
     finally:
         await producer.stop()
 
 
+
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-k', '--kafka-uri', default=KAFKA_SERVICE_URI,
+        help='the URI for the Kafka service, defaulting to $KAFKA_SERVICE_URI'
+        ' if that is set',
+    )
+    parser.add_argument(
+        '-t', '--topic', default=DEFAULT_TOPIC_NAME,
+        help=f'the Kafka topic to send to, defaulting to {DEFAULT_TOPIC_NAME}',
+    )
+    parser.add_argument(
+        '-d', '--certs-dir', default=DEFAULT_CERTS_FOLDER, type=pathlib.Path,
+        help=f'directory containing the ca.pem, service.cert and service.key'
+        ' files, default "{DEFAULT_CERTS_FOLDER}"',
+    )
+    parser.add_argument(
+        '-s', '--schema-uri', default=SCHEMA_REGISTRY_URI,
+        help='the URI for the Karapace schema registry, defaulting to'
+        ' $SCHEMA_REGISTRY_URI if that is set',
+        )
+
+    args = parser.parse_args()
+
+    if args.kafka_uri is None:
+        print('The URI for the Kafka service is required')
+        print('Set KAFKA_SERVICE_URI or use the -k switch')
+        logging.error('The URI for the Kafka service is required')
+        logging.error('Set KAFKA_SERVICE_URI or use the -k switch')
+        return -1
+
+    if args.schema_uri is None:
+        print('The URI for the Karapace schema registry is required')
+        print('Set SCHEMA_REGISTRY_URI or use the -s switch')
+        logging.error('The URI for the Karapace schema registry is required')
+        logging.error('Set SCHEMA_REGISTRY_URI or use the -s switch')
+        return -1
+
     with asyncio.Runner() as runner:
-        runner.run(send_messages_to_kafka())
+        runner.run(send_messages_to_kafka(
+            args.kafka_uri, args.topic, args.certs_dir, args.schema_uri,
+            ),
+        )
 
 
 

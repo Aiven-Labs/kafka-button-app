@@ -1,5 +1,9 @@
 # Kafka connectors
 
+> **Note** Check whether we need to display an attribution for use of the data
+> from Maxmind. I'm thinking of this after reading the README at
+> https://github.com/sapics/ip-location-db
+
 ## Plan of action
 
 This is to play with some of the connector stuff we want to do for our Kafka
@@ -227,3 +231,11 @@ least for the moment.
 The script now uses `aiokafka` to generate button presses for a single web
 page interaction. And the messages get into the topic, and tiered storage is
 being used.
+
+
+## At the end of the day
+
+Let's not waste resources
+```
+; avn service update $KAFKA_SERVICE_NAME --power-off
+```
