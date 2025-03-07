@@ -84,7 +84,6 @@ class Event(BaseModel):
     city_name: str           # may be ''
 
 
-# REMEMBER to double check that the optional fields work as we expect
 AVRO_SCHEMA = {
     'doc': 'Web app interactions',
     'name': TOPIC_NAME,
