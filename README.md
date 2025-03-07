@@ -4,7 +4,7 @@ A fun interactive web application built with FastAPI that sends user click inter
 
 > **Note** This branch is being used to develop the app -> Kafka -> PG connection.
 >
-> Development notes are in the [kafka-connectors.md](kafka-conectors.md) file, and will act as the basis for actual documentation.
+> Development notes are in the [kafka-connectors.md](kafka-connectors.md) file, and will act as the basis for actual documentation.
 
 ## Overview
 
