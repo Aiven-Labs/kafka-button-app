@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import datetime
 import io
+import json
 import logging
 import os
 import pathlib
@@ -18,6 +19,8 @@ from typing import Iterator, Optional
 from uuid import UUID, uuid4
 
 import avro
+import avro.io
+import avro.schema
 import dotenv
 import httpx
 
@@ -52,6 +55,12 @@ dotenv.load_dotenv()
 KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
+# We hard code the topic name.
+# For this demo program, it's not worth the complexity of making it settable
+# via the command line (that would need a fair amount of code reorganisation
+# so that schema definition wasn't at the top level). We *could* allow it to
+# be set via an environment variable, but haven't done so yet.
+#
 # Note that Avro schema names don't allow hyphens, and the JDBC connector
 # (at least by default) wants the topic name and schema name to match
 TOPIC_NAME = "button_presses"
@@ -64,15 +73,15 @@ class Action(StrEnum):
 
 
 class Event(BaseModel):
-    session_id: UUID
+    session_id: str
     timestamp: str
     action: str
     count: int
     country_name: str
     country_code: str
-    subdivision_name: Optional[str] = None
-    subdivision_code: Optional[str] = None
-    city_name: Optional[str] = None
+    subdivision_name: str    # may be ''
+    subdivision_code: str    # may be ''
+    city_name: str           # may be ''
 
 
 # REMEMBER to double check that the optional fields work as we expect
@@ -87,11 +96,15 @@ AVRO_SCHEMA = {
         {'name': 'count', 'type': 'int'},
         {'name': 'country_name', 'type': 'string'},
         {'name': 'country_code', 'type': 'string'},
-        {'name': 'subdivision_name', 'type': ['null', 'string'], 'default': None},
-        {'name': 'subdivision_code', 'type': ['null', 'string'], 'default': None},
-        {'name': 'city_name', 'type': ['null', 'string'], 'default': null},
+        {'name': 'subdivision_name', 'type': 'string'},
+        {'name': 'subdivision_code', 'type': 'string'},
+        {'name': 'city_name', 'type': 'string'},
     ],
 }
+
+
+# When we're passing the Avro schema around, we need to pass it as a string
+AVRO_SCHEMA_AS_STR = json.dumps(AVRO_SCHEMA)
 
 
 # Parsing the schema both validates it, and also puts it into a form that
@@ -104,6 +117,8 @@ def register_schema(schema_uri):
 
     Returns the schema id, which gets embedded into the messages.
     """
+
+    logging.info(f'Registering schema {TOPIC_NAME}-value')
     r = httpx.post(
         f'{schema_uri}/subjects/{TOPIC_NAME}-value/versions',
         json={"schema": AVRO_SCHEMA_AS_STR}
@@ -115,8 +130,23 @@ def register_schema(schema_uri):
     return response_json['id']
 
 
-def make_avro_payload(message: str, schema_id: int) -> bytes:
-    """Given a JSON string message, and a schema id, return an Avro payload.
+def make_avro_payload(event: Event, schema_id: int) -> bytes:
+    """Given an Event, and a schema id, return an Avro payload.
+
+    We assume the following:
+
+    * Use of `io.aiven.connect.jdbc.JdbcSinkConnector`
+      (https://github.com/aiven/jdbc-connector-for-apache-kafka/blob/master/docs/sink-connector.md)
+      to consume data from Kafka and write it to PostgreSQL. This is an Apache 2 licensed fork of
+      the Confluent `kafka-connect-jdbc` sink connector, from before it changed license
+      (the Confluent connector is no longer Open Source).
+    * Use of Karapace (https://www.karapace.io/) as our (open source) schema repository
+    * [Apache Avro™](https://avro.apache.org/) to serialize the messages. To each message
+      we'll also add the schema id.
+    * The JDBC sink connector will then "unpick" the message using the
+      `io.confluent.connect.avro.AvroConverter` connector
+      (https://github.com/confluentinc/schema-registry/blob/master/avro-converter/src/main/java/io/confluent/connect/avro/AvroConverter.java)
+      whose source code is Apache License, Version 2.0 licensed.
     """
     # The Avro encoder works by writing to a "file like" object,
     # so we shall use a BytesIO instance.
@@ -126,12 +156,12 @@ def make_avro_payload(message: str, schema_id: int) -> bytes:
     # The JDBC Connector needs us to put the schema id on the front of each Avro message.
     # We need to prepend a 0 byte and then the schema id as a 4 byte value.
     # We'll just do this by hand using the Python `struct` library.
-    header = struct.pack('>bI', 0, self.schema_id)
+    header = struct.pack('>bI', 0, schema_id)
     byte_data.write(header)
 
     # And then we add the actual data
     encoder = avro.io.BinaryEncoder(byte_data)
-    writer.write(order, encoder)
+    writer.write(dict(event), encoder)
     raw_bytes = byte_data.getvalue()
 
     return raw_bytes
@@ -153,8 +183,13 @@ def load_geoip_data():
     print('Database info:')
     pprint.pp(geoip.get_database_info())
 
+    return geoip
 
-def generate_session() -> Iterator[Event]:
+
+GEOIP = load_geoip_data()
+
+
+def generate_session(geoip) -> Iterator[Event]:
     """Yield button press message tuples from a single web app "session"
 
     Note we do *not* expose the IP address, as that counts as personal information.
@@ -164,7 +199,7 @@ def generate_session() -> Iterator[Event]:
     # connection, so let's not do that, at least for the moment. The consumer end can
     # worry about that.
 
-    session_id = uuid4()
+    session_id = str(uuid4())
     logging.info(f'Session {session_id}')
 
     # Our "now" in UTC
@@ -242,7 +277,6 @@ def generate_session() -> Iterator[Event]:
 
 async def send_messages_to_kafka(
         kafka_uri: str,
-        topic_name: str,
         certs_dir: pathlib.Path,
         schema_id: int,
 ):
@@ -261,15 +295,11 @@ async def send_messages_to_kafka(
     await producer.start()
 
     try:
-        for event in generate_session():
-            # Convert our event to a JSON string, and then make sure it's UTF-8.
-            # Given we're using country and city names, this feels safer than 'ascii'.
-            # We *could* instead specify a `value_serializer` parameter to AIOKafkaProducer
-            message = event.model_dump_json().encode('utf-8')
-            print(f'EVENT {message}')
-            raw_bytes = make_avro_payload(message, schema_id)
+        for event in generate_session(GEOIP):
+            print(f'EVENT {event}')
+            raw_bytes = make_avro_payload(event, schema_id)
             # For the moment, don't let it buffer messages
-            await producer.send_and_wait(topic_name, raw_bytes)
+            await producer.send_and_wait(TOPIC_NAME, raw_bytes)
     finally:
         await producer.stop()
 
@@ -283,10 +313,6 @@ def main():
         '-k', '--kafka-uri', default=KAFKA_SERVICE_URI,
         help='the URI for the Kafka service, defaulting to $KAFKA_SERVICE_URI'
         ' if that is set',
-    )
-    parser.add_argument(
-        '-t', '--topic', default=DEFAULT_TOPIC_NAME,
-        help=f'the Kafka topic to send to, defaulting to {DEFAULT_TOPIC_NAME}',
     )
     parser.add_argument(
         '-d', '--certs-dir', default=DEFAULT_CERTS_FOLDER, type=pathlib.Path,
@@ -321,7 +347,7 @@ def main():
 
     with asyncio.Runner() as runner:
         runner.run(send_messages_to_kafka(
-            args.kafka_uri, args.topic, args.certs_dir, schema_id,
+            args.kafka_uri, args.certs_dir, schema_id,
             ),
         )
 
