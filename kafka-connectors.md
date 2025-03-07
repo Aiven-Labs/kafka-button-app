@@ -296,3 +296,75 @@ and we can use our friendly wait command
 ```
 avn service wait $PG_SERVICE_NAME
 ```
+
+## Message design
+
+The message content has been evolving as I think about it - here's the current
+design:
+
+* **session_id** is a UUID that identifies the session using the web app. This
+  allows us to group the events taken by the user during that session. A UUID
+  is a fairly traditional solution for this. For simplicity, we use the
+  traditional string representation (for instance
+  `afd52111-9f40-4c62-80cc-d91c121e470a`) even though those hyphens are
+  strictly redundant.
+* **timestamp** says when the event happened, in UTC. We represent this as a string using
+  the standard ISO 8601 format (for instance `2025-03-07T10:33:46.754240+00:00`),
+  because that's the most unabmiguous way of doing it, even if it's longer
+  than, for instance, a Unix timestamp. It makes it very clear what timezone
+  the timestamp is in, and also doesn't require people to figure out whether
+  the Unix timestemp they've been given is in seconds or milliseconds or
+  microseconds since the epoch.
+* **action** is a string, one of `EnterPage`, `PressButton` or `ExitPage`. We
+  could use small integers, but the string is easier to understand.
+* **count** is an integer, starting at 0, representing the sequence of the
+  event in the session. This was added at the suggestion of one of our interns
+  (no, actually it was me) because the `count` for the `ExitPage` event says
+  how many events there were in that session. This means we can tell if we've
+  got all of the events for the session - there should be that number. 
+
+  We might care about this because events don't always arrive in order
+  (because internet), so we might receive the `ExitPage` before we've got all
+  the other events, and also because sometimes events get lost (again, because
+  internet), in which case the `count` on individual items allows us to know
+  which events were lost.
+ 
+  Is this useful information? Well, if we don't collect it, we won't be able
+  to use it.
+ 
+  One small caution - we're using an integer for this, so there's a built-in
+  (but unspecified) assumption of the maximum number of events in a session.
+  We do not define what happens if that integer gets too big.
+
+Then we get the location date that is looked up using the geoip2fast package.
+We can do this once at the start of our web session. See
+https://github.com/rabuchaim/geoip2fast for more information. Remember that
+the information determined is, by its nature, approximate, and that not all IP
+addresses will give useful values.
+
+* **country_name** is the name of the country where the IP address appears to
+  be located, or some other string (for instance, for private networks, or if
+  the IP address is not in the database).
+* **country_code** is the two letter ISO code for the country, or `--`.
+* **subdivision_name** is the "subdivision" code - for the USA, this might be
+  a state. This may be unset (`null`).
+* **subdivision_code** is a two letter code for that subdivision. This may be
+  unset (`null`).
+* **city_name** is the name of the city where the IP address appears to be
+  located. This may be unset (`null`).
+
+Things that aren't there
+* We don't put the actual IP address in the message, as that counts as
+  personal information, and thus we want to redact it.
+* We don't put latitude and longitude data (representing the approximate
+  location) because the current version of geoip2fast doesn't provide it, and
+  because looking it up would require an internet query, which we'd rather not
+  do. And in practice we'd also need to maintain our own cache of country ->
+  lat, long and city -> lat, long, because we might need to make a *lot* of
+  such queries, and the upstream service would justifiably want us to rate
+  limit. That all means we want to defer that to the far end, because after
+  all the data user might not even want that information.
+
+  (If geoip2fast becomes able to return approximate lat, long values, then
+  this balance changes.)
+

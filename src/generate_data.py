@@ -67,6 +67,7 @@ class Event(BaseModel):
     session_id: UUID
     timestamp: str
     action: str
+    count: int
     country_name: str
     country_code: str
     subdivision_name: Optional[str] = None
@@ -83,6 +84,7 @@ AVRO_SCHEMA = {
         {'name': 'session_id', 'type': 'string'},
         {'name': 'timestamp', 'type': 'string'},
         {'name': 'action', 'type': 'string'},
+        {'name': 'count', 'type': 'int'},
         {'name': 'country_name', 'type': 'string'},
         {'name': 'country_code', 'type': 'string'},
         {'name': 'subdivision_name', 'type': ['null', 'string'], 'default': None},
@@ -199,10 +201,12 @@ def generate_session() -> Iterator[Event]:
     print(geoip_data.pp_json())
 
     # Most of our data stays the same, so we can handily use a dictionary
+    count = 0
     data = {
         'session_id': session_id,
         'timestamp': now.isoformat(),
         'action': str(Action.ENTER_PAGE),
+        'count': count,
         'country_name': country_name,
         'country_code': country_code,
         'subdivision_name': subdivision_name,
@@ -220,12 +224,17 @@ def generate_session() -> Iterator[Event]:
         now += datetime.timedelta(milliseconds=random.randint(500, 5000))
         logging.info(f'Press {press} at {now}')
 
+        count += 1
+        data['count'] = count
         data['timestamp'] = now.isoformat()
         yield Event(**data)
 
     now += datetime.timedelta(milliseconds=random.randint(500, 5000))
     logging.info(f'Leave page at {now}')
 
+    # And at the end, `count` reflects the total number of events for this session
+    count += 1
+    data['count'] = count
     data['timestamp'] = now.isoformat()
     data['action'] = str(Action.EXIT_PAGE)
     yield Event(**data)
