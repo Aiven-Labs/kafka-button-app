@@ -189,21 +189,14 @@ def load_geoip_data():
 GEOIP = load_geoip_data()
 
 
-def generate_session(geoip) -> Iterator[Event]:
-    """Yield button press message tuples from a single web app "session"
-
-    Note we do *not* expose the IP address, as that counts as personal information.
-    If we don't yield it in our datastructure, then there's no way we can leak it.
+def create_event_dict(geoip, ip_address) -> dict:
+    """Create the initial EnterPage event for a session.
     """
-    # I can't see a way of getting the lat, long for a city without using an internet
-    # connection, so let's not do that, at least for the moment. The consumer end can
-    # worry about that.
-
     session_id = str(uuid4())
     logging.info(f'Session {session_id}')
 
-    # Our "now" in UTC
-    now = datetime.datetime.now(datetime.timezone.utc)
+    # Our "now" in UTC as an ISO format string
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # We'll represent this in messages using the standard ISO format, because
     # that's the most unabmiguous way of doing it, even if it's longer than,
@@ -211,13 +204,6 @@ def generate_session(geoip) -> Iterator[Event]:
     # the timestamp is in, and also doesn't require people to figure out
     # whether they've got seconds or milliseconds or microseconds since
     # the epoch.
-
-    if random.randint(1,3) == 3:    # or some other distribution
-        #ip_address = fake.ipv6()
-        ip_address = geoip.generate_random_ipv6_address()
-    else:
-        #ip_address = fake.ipv4()
-        ip_address = geoip.generate_random_ipv4_address()
 
     try:
         geoip_data = geoip.lookup(ip_address)
@@ -236,12 +222,11 @@ def generate_session(geoip) -> Iterator[Event]:
     print(geoip_data.pp_json())
 
     # Most of our data stays the same, so we can handily use a dictionary
-    count = 0
-    data = {
+    return {
         'session_id': session_id,
-        'timestamp': now.isoformat(),
+        'timestamp': now,
         'action': str(Action.ENTER_PAGE),
-        'count': count,
+        'count': 0,
         'country_name': country_name,
         'country_code': country_code,
         'subdivision_name': subdivision_name,
@@ -249,30 +234,61 @@ def generate_session(geoip) -> Iterator[Event]:
         'city_name': city_name,
     }
 
-    yield Event(**data)
+def update_event_dict(event_dict: dict, action: Action) -> dict:
+    """Update the event dictionary for a new action.
+    """
+    # This new "now" in UTC
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    event_dict['count'] = event_dict['count'] + 1
+    event_dict['timestamp'] = now
+    event_dict['action'] = str(action)
+    # and return it for convenience
+    return event_dict
+
+
+def generate_session(geoip) -> Iterator[Event]:
+    """Yield button press message tuples from a single web app "session"
+
+    Note we do *not* expose the IP address, as that counts as personal information.
+    If we don't yield it in our datastructure, then there's no way we can leak it.
+    """
+    # I can't see a way of getting the lat, long for a city without using an internet
+    # connection, so let's not do that, at least for the moment. The consumer end can
+    # worry about that.
+
+    if random.randint(1,3) == 3:    # or some other distribution
+        #ip_address = fake.ipv6()
+        ip_address = geoip.generate_random_ipv6_address()
+    else:
+        #ip_address = fake.ipv4()
+        ip_address = geoip.generate_random_ipv4_address()
+
+    # Our "now" in UTC
+    fake_now = datetime.datetime.now(datetime.timezone.utc)
+
+    event_dict = create_event_dict(geoip, ip_address)
+
+    yield Event(**event_dict)
 
     # Luckily we're not trying to be especially random, so this is good enough
     number_presses = random.randint(1, 10)
-    data['action'] = str(Action.PRESS_BUTTON)
     for press in range(number_presses):
+        logging.info(f'Press {press} at {fake_now}')
+
+        event_dict = update_event_dict(event_dict, Action.PRESS_BUTTON)
         # Pretend we have elapsed time between button presses
-        now += datetime.timedelta(milliseconds=random.randint(500, 5000))
-        logging.info(f'Press {press} at {now}')
+        fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
+        event_dict['timestamp'] = fake_now.isoformat()
 
-        count += 1
-        data['count'] = count
-        data['timestamp'] = now.isoformat()
-        yield Event(**data)
+        yield Event(**event_dict)
 
-    now += datetime.timedelta(milliseconds=random.randint(500, 5000))
-    logging.info(f'Leave page at {now}')
+    logging.info(f'Leave page at {fake_now}')
 
     # And at the end, `count` reflects the total number of events for this session
-    count += 1
-    data['count'] = count
-    data['timestamp'] = now.isoformat()
-    data['action'] = str(Action.EXIT_PAGE)
-    yield Event(**data)
+    event_dict = update_event_dict(event_dict, Action.EXIT_PAGE)
+    # Remember we're pretending time is elapsing
+    fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
+    yield Event(**event_dict)
 
 
 async def send_messages_to_kafka(
