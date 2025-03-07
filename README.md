@@ -1,4 +1,4 @@
-# Don't Push the Button
+# Pushing this button does nothing (really)
 
 A fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka.
 
