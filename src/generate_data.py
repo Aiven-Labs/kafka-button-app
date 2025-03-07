@@ -189,64 +189,65 @@ def load_geoip_data():
 GEOIP = load_geoip_data()
 
 
-def create_event_dict(geoip, ip_address) -> dict:
-    """Create the initial EnterPage event for a session.
+class EventCreator:
+    """A way of creating a sequence of linked events, with shared data.
     """
-    session_id = str(uuid4())
-    logging.info(f'Session {session_id}')
 
-    # Our "now" in UTC as an ISO format string
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    def __init__(self, ip_address: str):
+        """Perform the basic setup of a sequence of session events."""
 
-    # We'll represent this in messages using the standard ISO format, because
-    # that's the most unabmiguous way of doing it, even if it's longer than,
-    # for instance, a Unix timestamp. It makes it very clear what timezone
-    # the timestamp is in, and also doesn't require people to figure out
-    # whether they've got seconds or milliseconds or microseconds since
-    # the epoch.
+        self.session_id = str(uuid4())
+        logging.info(f'Session {self.session_id}')
 
-    try:
-        geoip_data = geoip.lookup(ip_address)
-    except GeoIPError as e:
-        logging.error(f'IP lookup error: {e}')
-        logging.error(f'Trying to lookup {ip_address}')
-        return
+        try:
+            geoip_data = GEOIP.lookup(ip_address)
+        except GeoIPError as e:
+            logging.error(f'IP lookup error: {e}')
+            logging.error(f'Trying to lookup {ip_address}')
+            raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
 
-    country_name = geoip_data.country_name
-    country_code = geoip_data.country_code
-    city_name = geoip_data.city.name
-    subdivision_name = geoip_data.city.subdivision_name
-    subdivision_code = geoip_data.city.subdivision_code
-    logging.info(f'IP {ip_address} -> {country_name}, {country_code} ({city_name}, {subdivision_name}, {subdivision_code}')
+        self.country_name = geoip_data.country_name
+        self.country_code = geoip_data.country_code
+        self.city_name = geoip_data.city.name
+        self.subdivision_name = geoip_data.city.subdivision_name
+        self.subdivision_code = geoip_data.city.subdivision_code
 
-    print(geoip_data.pp_json())
+        self.count = 0
 
-    # Most of our data stays the same, so we can handily use a dictionary
-    return {
-        'session_id': session_id,
-        'timestamp': now,
-        'action': str(Action.ENTER_PAGE),
-        'count': 0,
-        'country_name': country_name,
-        'country_code': country_code,
-        'subdivision_name': subdivision_name,
-        'subdivision_code': subdivision_code,
-        'city_name': city_name,
-    }
+    def new_event(self, action: Action) -> Event:
+        # Our "now" in UTC as an ISO format string
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return Event(
+            session_id = self.session_id,
+            timestamp = now,
+            action = str(action),
+            count = self.count,
+            country_name = self.country_name,
+            country_code = self.country_code,
+            subdivision_name = self.subdivision_name,
+            subdivision_code = self.subdivision_code,
+            city_name = self.city_name,
+        )
 
-def update_event_dict(event_dict: dict, action: Action) -> dict:
-    """Update the event dictionary for a new action.
-    """
-    # This new "now" in UTC
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    event_dict['count'] = event_dict['count'] + 1
-    event_dict['timestamp'] = now
-    event_dict['action'] = str(action)
-    # and return it for convenience
-    return event_dict
+    def enter_page(self) -> Event:
+        """Return our page entry event"""
+        # Because we're just entering the page, our count is 0
+        self.count = 0
+        return self.new_event(Action.ENTER_PAGE)
+
+    def press_button(self) -> Event:
+        """Return a button press event"""
+        self.count += 1
+        return self.new_event(Action.PRESS_BUTTON)
 
 
-def generate_session(geoip) -> Iterator[Event]:
+    def exit_page(self) -> Event:
+        """Return our page exit event"""
+        self.count += 1
+        return self.new_event(Action.EXIT_PAGE)
+
+
+def generate_session() -> Iterator[Event]:
     """Yield button press message tuples from a single web app "session"
 
     Note we do *not* expose the IP address, as that counts as personal information.
@@ -258,37 +259,39 @@ def generate_session(geoip) -> Iterator[Event]:
 
     if random.randint(1,3) == 3:    # or some other distribution
         #ip_address = fake.ipv6()
-        ip_address = geoip.generate_random_ipv6_address()
+        ip_address = GEOIP.generate_random_ipv6_address()
     else:
         #ip_address = fake.ipv4()
-        ip_address = geoip.generate_random_ipv4_address()
+        ip_address = GEOIP.generate_random_ipv4_address()
 
-    # Our "now" in UTC
+    event_creator = EventCreator(ip_address)
+
+    # We start with an EnterPage event
+    enter_page = event_creator.enter_page()
+    # But remember to use our own idea of what time it is
     fake_now = datetime.datetime.now(datetime.timezone.utc)
-
-    event_dict = create_event_dict(geoip, ip_address)
-
-    yield Event(**event_dict)
+    enter_page.timestamp = fake_now.isoformat()
+    yield enter_page
 
     # Luckily we're not trying to be especially random, so this is good enough
     number_presses = random.randint(1, 10)
     for press in range(number_presses):
+        fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
         logging.info(f'Press {press} at {fake_now}')
 
-        event_dict = update_event_dict(event_dict, Action.PRESS_BUTTON)
+        press_button = event_creator.press_button()
         # Pretend we have elapsed time between button presses
-        fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
-        event_dict['timestamp'] = fake_now.isoformat()
-
-        yield Event(**event_dict)
+        press_button.timestamp = fake_now.isoformat()
+        yield press_button
 
     logging.info(f'Leave page at {fake_now}')
 
-    # And at the end, `count` reflects the total number of events for this session
-    event_dict = update_event_dict(event_dict, Action.EXIT_PAGE)
+    # And at the end, the event `count` field reflects the total number of events for this session
+    exit_page = event_creator.exit_page()
     # Remember we're pretending time is elapsing
     fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
-    yield Event(**event_dict)
+    exit_page.timestamp = fake_now.isoformat()
+    yield exit_page
 
 
 async def send_messages_to_kafka(
@@ -311,16 +314,13 @@ async def send_messages_to_kafka(
     await producer.start()
 
     try:
-        for event in generate_session(GEOIP):
+        for event in generate_session():
             print(f'EVENT {event}')
             raw_bytes = make_avro_payload(event, schema_id)
             # For the moment, don't let it buffer messages
             await producer.send_and_wait(TOPIC_NAME, raw_bytes)
     finally:
         await producer.stop()
-
-
-
 
 
 def main():
