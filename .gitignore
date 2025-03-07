@@ -1,5 +1,7 @@
 # Kafka certification files
 certs/
+# JSON files we use for Kafka connector definitions
+*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
