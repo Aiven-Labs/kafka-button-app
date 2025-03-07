@@ -2,6 +2,10 @@
 
 A fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka.
 
+> **Note** This branch is being used to develop the app -> Kafka -> PG connection.
+>
+> Development notes are in the [kafka-connectors.md](kafka-conectors.md) file, and will act as the basis for actual documentation.
+
 ## Overview
 
 This project is a demonstration application for the Aiven for Apache Kafka Workshop. It presents users with a button they're told not to push, then captures and streams interaction data to Kafka when they inevitably push it.
