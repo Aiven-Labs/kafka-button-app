@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+
+"""All the code we need to handle generating our messages."""
+
+import datetime
+import io
+import json
+import logging
+import pprint
+import struct
+
+from enum import StrEnum
+from uuid import UUID, uuid4
+
+import avro
+import avro.io
+import avro.schema
+import httpx
+
+from geoip2fast import GeoIP2Fast
+from geoip2fast.geoip2fast import GeoIPError
+from pydantic import BaseModel
+
+logging.basicConfig(level=logging.INFO)
+
+
+# The geoip2fast dataset we want to use. Note that this is one we need to
+# download ourselves.
+GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
+
+
+# We hard code the topic name.
+# For this demo program, it's not worth the complexity of making it settable
+# via the command line (that would need a fair amount of code reorganisation
+# so that schema definition wasn't at the top level). We *could* allow it to
+# be set via an environment variable, but haven't done so yet.
+#
+# Note that Avro schema names don't allow hyphens, and the JDBC connector
+# (at least by default) wants the topic name and schema name to match
+TOPIC_NAME = "button_presses"
+
+
+class Action(StrEnum):
+    ENTER_PAGE = 'EnterPage'
+    PRESS_BUTTON = 'PressButton'
+    EXIT_PAGE = 'ExitPage'
+
+
+class Event(BaseModel):
+    session_id: str
+    timestamp: str
+    action: str
+    count: int
+    country_name: str
+    country_code: str
+    subdivision_name: str    # may be ''
+    subdivision_code: str    # may be ''
+    city_name: str           # may be ''
+
+
+AVRO_SCHEMA = {
+    'doc': 'Web app interactions',
+    'name': TOPIC_NAME,
+    'type': 'record',
+    'fields': [
+        {'name': 'session_id', 'type': 'string'},
+        {'name': 'timestamp', 'type': 'string'},
+        {'name': 'action', 'type': 'string'},
+        {'name': 'count', 'type': 'int'},
+        {'name': 'country_name', 'type': 'string'},
+        {'name': 'country_code', 'type': 'string'},
+        {'name': 'subdivision_name', 'type': 'string'},
+        {'name': 'subdivision_code', 'type': 'string'},
+        {'name': 'city_name', 'type': 'string'},
+    ],
+}
+
+
+# When we're passing the Avro schema around, we need to pass it as a string
+AVRO_SCHEMA_AS_STR = json.dumps(AVRO_SCHEMA)
+
+
+def load_geoip_data():
+    try:
+        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
+    except Exception:
+        # Download the city data
+        # We DO NOT want to do this in a web application! In that situation, we should download
+        # the file separately from the release directory - so getting
+        # https://github.com/rabuchaim/geoip2fast/releases/download/LATEST/geoip2fast-city-asn-ipv6.dat.gz
+        logging.info('Downloading city IP data')
+        G = GeoIP2Fast()
+        G.update_file(GEOIP_DATASET_FILENAME)
+        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
+
+    print('Database info:')
+    pprint.pp(geoip.get_database_info())
+
+    return geoip
+
+
+GEOIP = load_geoip_data()
+
+
+class EventCreator:
+    """A way of creating a sequence of linked events, with shared data.
+    """
+
+    def __init__(self, ip_address: str):
+        """Perform the basic setup of a sequence of session events."""
+
+        self.session_id = str(uuid4())
+        logging.info(f'Session {self.session_id}')
+
+        try:
+            geoip_data = GEOIP.lookup(ip_address)
+        except GeoIPError as e:
+            logging.error(f'IP lookup error: {e}')
+            logging.error(f'Trying to lookup {ip_address}')
+            raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
+
+        self.country_name = geoip_data.country_name
+        self.country_code = geoip_data.country_code
+        self.city_name = geoip_data.city.name
+        self.subdivision_name = geoip_data.city.subdivision_name
+        self.subdivision_code = geoip_data.city.subdivision_code
+
+        self.count = 0
+
+    def new_event(self, action: Action) -> Event:
+        # Our "now" in UTC as an ISO format string
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return Event(
+            session_id = self.session_id,
+            timestamp = now,
+            action = str(action),
+            count = self.count,
+            country_name = self.country_name,
+            country_code = self.country_code,
+            subdivision_name = self.subdivision_name,
+            subdivision_code = self.subdivision_code,
+            city_name = self.city_name,
+        )
+
+    def enter_page(self) -> Event:
+        """Return our page entry event"""
+        # Because we're just entering the page, our count is 0
+        self.count = 0
+        return self.new_event(Action.ENTER_PAGE)
+
+    def press_button(self) -> Event:
+        """Return a button press event"""
+        self.count += 1
+        return self.new_event(Action.PRESS_BUTTON)
+
+
+    def exit_page(self) -> Event:
+        """Return our page exit event"""
+        self.count += 1
+        return self.new_event(Action.EXIT_PAGE)
+
+# Parsing the schema both validates it, and also puts it into a form that
+# can be used when envoding/decoding message data
+PARSED_SCHEMA = avro.schema.parse(AVRO_SCHEMA_AS_STR)
+
+
+def register_schema(schema_uri):
+    """Register our schema with Karapace.
+
+    Returns the schema id, which gets embedded into the messages.
+    """
+
+    logging.info(f'Registering schema {TOPIC_NAME}-value')
+    r = httpx.post(
+        f'{schema_uri}/subjects/{TOPIC_NAME}-value/versions',
+        json={"schema": AVRO_SCHEMA_AS_STR}
+    )
+    r.raise_for_status()
+
+    logging.info(f'Registered schema {r} {r.text=} {r.json()=}')
+    response_json = r.json()
+    return response_json['id']
+
+
+def make_avro_payload(event: Event, schema_id: int) -> bytes:
+    """Given an Event, and a schema id, return an Avro payload.
+
+    We assume the following:
+
+    * Use of `io.aiven.connect.jdbc.JdbcSinkConnector`
+      (https://github.com/aiven/jdbc-connector-for-apache-kafka/blob/master/docs/sink-connector.md)
+      to consume data from Kafka and write it to PostgreSQL. This is an Apache 2 licensed fork of
+      the Confluent `kafka-connect-jdbc` sink connector, from before it changed license
+      (the Confluent connector is no longer Open Source).
+    * Use of Karapace (https://www.karapace.io/) as our (open source) schema repository
+    * [Apache Avro™](https://avro.apache.org/) to serialize the messages. To each message
+      we'll also add the schema id.
+    * The JDBC sink connector will then "unpick" the message using the
+      `io.confluent.connect.avro.AvroConverter` connector
+      (https://github.com/confluentinc/schema-registry/blob/master/avro-converter/src/main/java/io/confluent/connect/avro/AvroConverter.java)
+      whose source code is Apache License, Version 2.0 licensed.
+    """
+    # The Avro encoder works by writing to a "file like" object,
+    # so we shall use a BytesIO instance.
+    writer = avro.io.DatumWriter(PARSED_SCHEMA)
+    byte_data = io.BytesIO()
+
+    # The JDBC Connector needs us to put the schema id on the front of each Avro message.
+    # We need to prepend a 0 byte and then the schema id as a 4 byte value.
+    # We'll just do this by hand using the Python `struct` library.
+    header = struct.pack('>bI', 0, schema_id)
+    byte_data.write(header)
+
+    # And then we add the actual data
+    encoder = avro.io.BinaryEncoder(byte_data)
+    writer.write(dict(event), encoder)
+    raw_bytes = byte_data.getvalue()
+
+    return raw_bytes
