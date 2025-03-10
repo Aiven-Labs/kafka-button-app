@@ -767,3 +767,10 @@ Indexes:
 
 > **Note** Because I set the JDBC connector to disallow schema evolution, I
 > had to restart the connector. 
+
+## More refactoring
+
+The code in [`src/message_support/py`](src/message_support.py) (honestly, not
+a great name for the file), which is the code used in the fake message script,
+should now be suitable for using in the app, at least to a first
+approximation.
