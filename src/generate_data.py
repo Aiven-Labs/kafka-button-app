@@ -16,15 +16,17 @@ import dotenv
 
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
+import avro.schema
 
-from message_handling import GEOIP
-from message_handling import TOPIC_NAME
-from message_handling import Event
-from message_handling import load_geoip_data
-from message_handling import register_schema
-from message_handling import httpx
-from message_handling import EventCreator
-from message_handling import make_avro_payload
+from message_support import GEOIP
+from message_support import TOPIC_NAME
+from message_support import Event
+from message_support import load_geoip_data
+from message_support import get_parsed_schema
+from message_support import register_schema
+from message_support import httpx
+from message_support import EventCreator
+from message_support import make_avro_payload
 
 
 # Since geoip2fast has IP address generation methods, we don't need Faker
@@ -102,6 +104,7 @@ async def send_messages_to_kafka(
         kafka_uri: str,
         certs_dir: pathlib.Path,
         schema_id: int,
+        parsed_schema: avro.schema.RecordSchema,
 ):
     ssl_context = create_ssl_context(
         cafile=certs_dir / "ca.pem",
@@ -120,7 +123,7 @@ async def send_messages_to_kafka(
     try:
         for event in generate_session():
             print(f'EVENT {event}')
-            raw_bytes = make_avro_payload(event, schema_id)
+            raw_bytes = make_avro_payload(event, schema_id, parsed_schema)
             # For the moment, don't let it buffer messages
             await producer.send_and_wait(TOPIC_NAME, raw_bytes)
     finally:
@@ -163,11 +166,15 @@ def main():
 
     load_geoip_data()
 
+    # Parsing the schema both validates it, and also puts it into a form that
+    # can be used when envoding/decoding message data
+    parsed_schema = get_parsed_schema()
+
     schema_id = register_schema(args.schema_uri)
 
     with asyncio.Runner() as runner:
         runner.run(send_messages_to_kafka(
-            args.kafka_uri, args.certs_dir, schema_id,
+            args.kafka_uri, args.certs_dir, schema_id, parsed_schema,
             ),
         )
 

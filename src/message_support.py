@@ -29,6 +29,28 @@ logging.basicConfig(level=logging.INFO)
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
 
+def load_geoip_data():
+    try:
+        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
+    except Exception:
+        # Download the city data
+        # We DO NOT want to do this in a web application! In that situation, we should download
+        # the file separately from the release directory - so getting
+        # https://github.com/rabuchaim/geoip2fast/releases/download/LATEST/geoip2fast-city-asn-ipv6.dat.gz
+        logging.info('Downloading city IP data')
+        G = GeoIP2Fast()
+        G.update_file(GEOIP_DATASET_FILENAME)
+        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
+
+    print('Database info:')
+    pprint.pp(geoip.get_database_info())
+
+    return geoip
+
+
+GEOIP = load_geoip_data()
+
+
 # We hard code the topic name.
 # For this demo program, it's not worth the complexity of making it settable
 # via the command line (that would need a fair amount of code reorganisation
@@ -80,26 +102,69 @@ AVRO_SCHEMA = {
 AVRO_SCHEMA_AS_STR = json.dumps(AVRO_SCHEMA)
 
 
-def load_geoip_data():
-    try:
-        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
-    except Exception:
-        # Download the city data
-        # We DO NOT want to do this in a web application! In that situation, we should download
-        # the file separately from the release directory - so getting
-        # https://github.com/rabuchaim/geoip2fast/releases/download/LATEST/geoip2fast-city-asn-ipv6.dat.gz
-        logging.info('Downloading city IP data')
-        G = GeoIP2Fast()
-        G.update_file(GEOIP_DATASET_FILENAME)
-        geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
-
-    print('Database info:')
-    pprint.pp(geoip.get_database_info())
-
-    return geoip
+def get_parsed_schema() -> avro.schema.RecordSchema:
+    # Parsing the schema both validates it, and also puts it into a form that
+    # can be used when envoding/decoding message data
+    return avro.schema.parse(AVRO_SCHEMA_AS_STR)
 
 
-GEOIP = load_geoip_data()
+def register_schema(schema_uri: str) -> int:
+    """Register our schema with Karapace.
+
+    Returns the schema id, which gets embedded into the messages.
+    """
+
+    logging.info(f'Registering schema {TOPIC_NAME}-value')
+    r = httpx.post(
+        f'{schema_uri}/subjects/{TOPIC_NAME}-value/versions',
+        json={"schema": AVRO_SCHEMA_AS_STR}
+    )
+    r.raise_for_status()
+
+    logging.info(f'Registered schema {r} {r.text=} {r.json()=}')
+    response_json = r.json()
+    return response_json['id']
+
+
+def make_avro_payload(
+        event: Event,
+        schema_id: int,
+        parsed_schema: avro.schema.RecordSchema,
+) -> bytes:
+    """Given an Event, and a schema id, return an Avro payload.
+
+    We assume the following:
+
+    * Use of `io.aiven.connect.jdbc.JdbcSinkConnector`
+      (https://github.com/aiven/jdbc-connector-for-apache-kafka/blob/master/docs/sink-connector.md)
+      to consume data from Kafka and write it to PostgreSQL. This is an Apache 2 licensed fork of
+      the Confluent `kafka-connect-jdbc` sink connector, from before it changed license
+      (the Confluent connector is no longer Open Source).
+    * Use of Karapace (https://www.karapace.io/) as our (open source) schema repository
+    * [Apache Avro™](https://avro.apache.org/) to serialize the messages. To each message
+      we'll also add the schema id.
+    * The JDBC sink connector will then "unpick" the message using the
+      `io.confluent.connect.avro.AvroConverter` connector
+      (https://github.com/confluentinc/schema-registry/blob/master/avro-converter/src/main/java/io/confluent/connect/avro/AvroConverter.java)
+      whose source code is Apache License, Version 2.0 licensed.
+    """
+    # The Avro encoder works by writing to a "file like" object,
+    # so we shall use a BytesIO instance.
+    writer = avro.io.DatumWriter(parsed_schema)
+    byte_data = io.BytesIO()
+
+    # The JDBC Connector needs us to put the schema id on the front of each Avro message.
+    # We need to prepend a 0 byte and then the schema id as a 4 byte value.
+    # We'll just do this by hand using the Python `struct` library.
+    header = struct.pack('>bI', 0, schema_id)
+    byte_data.write(header)
+
+    # And then we add the actual data
+    encoder = avro.io.BinaryEncoder(byte_data)
+    writer.write(dict(event), encoder)
+    raw_bytes = byte_data.getvalue()
+
+    return raw_bytes
 
 
 class EventCreator:
@@ -158,62 +223,3 @@ class EventCreator:
         """Return our page exit event"""
         self.count += 1
         return self.new_event(Action.EXIT_PAGE)
-
-# Parsing the schema both validates it, and also puts it into a form that
-# can be used when envoding/decoding message data
-PARSED_SCHEMA = avro.schema.parse(AVRO_SCHEMA_AS_STR)
-
-
-def register_schema(schema_uri):
-    """Register our schema with Karapace.
-
-    Returns the schema id, which gets embedded into the messages.
-    """
-
-    logging.info(f'Registering schema {TOPIC_NAME}-value')
-    r = httpx.post(
-        f'{schema_uri}/subjects/{TOPIC_NAME}-value/versions',
-        json={"schema": AVRO_SCHEMA_AS_STR}
-    )
-    r.raise_for_status()
-
-    logging.info(f'Registered schema {r} {r.text=} {r.json()=}')
-    response_json = r.json()
-    return response_json['id']
-
-
-def make_avro_payload(event: Event, schema_id: int) -> bytes:
-    """Given an Event, and a schema id, return an Avro payload.
-
-    We assume the following:
-
-    * Use of `io.aiven.connect.jdbc.JdbcSinkConnector`
-      (https://github.com/aiven/jdbc-connector-for-apache-kafka/blob/master/docs/sink-connector.md)
-      to consume data from Kafka and write it to PostgreSQL. This is an Apache 2 licensed fork of
-      the Confluent `kafka-connect-jdbc` sink connector, from before it changed license
-      (the Confluent connector is no longer Open Source).
-    * Use of Karapace (https://www.karapace.io/) as our (open source) schema repository
-    * [Apache Avro™](https://avro.apache.org/) to serialize the messages. To each message
-      we'll also add the schema id.
-    * The JDBC sink connector will then "unpick" the message using the
-      `io.confluent.connect.avro.AvroConverter` connector
-      (https://github.com/confluentinc/schema-registry/blob/master/avro-converter/src/main/java/io/confluent/connect/avro/AvroConverter.java)
-      whose source code is Apache License, Version 2.0 licensed.
-    """
-    # The Avro encoder works by writing to a "file like" object,
-    # so we shall use a BytesIO instance.
-    writer = avro.io.DatumWriter(PARSED_SCHEMA)
-    byte_data = io.BytesIO()
-
-    # The JDBC Connector needs us to put the schema id on the front of each Avro message.
-    # We need to prepend a 0 byte and then the schema id as a 4 byte value.
-    # We'll just do this by hand using the Python `struct` library.
-    header = struct.pack('>bI', 0, schema_id)
-    byte_data.write(header)
-
-    # And then we add the actual data
-    encoder = avro.io.BinaryEncoder(byte_data)
-    writer.write(dict(event), encoder)
-    raw_bytes = byte_data.getvalue()
-
-    return raw_bytes
