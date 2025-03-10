@@ -72,8 +72,6 @@ class LifespanData:
 lifespan_data = LifespanData()
 
 
-
-
 async def start_producer() -> AIOKafkaProducer:
     """Start our Kafka producer."""
     ssl_context = create_ssl_context(
@@ -108,14 +106,13 @@ def setup_avro_schema():
     )
 
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     lifespan_data.geoip = load_geoip_data()
     setup_avro_schema()
     lifespan_data.producer = await start_producer()
     yield
-    await app.producer.stop()
+    await lifespan_data.producer.stop()
 
 
 # Initialize FastAPI app
@@ -126,7 +123,6 @@ app = FastAPI(
 
 # Set up templates
 templates = Jinja2Templates(directory="templates")
-#app.mount("/static", StaticFiles(directory="static"), name="static")
 
 session = uuid4()
 geoip = GeoIP2Fast()
@@ -159,6 +155,7 @@ def get_client_ip(request: Request) -> str:
         # If no X-Forwarded-For header, use the direct client's IP
         return request.client.host if request.client else "unknown"
 
+import uuid
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
@@ -167,17 +164,31 @@ async def get_index(request: Request):
     context = {
         "request": request,
         "button_response": "Clicking this button does absolutely nothing.",
+        "uuid": str(uuid.uuid4()),
     }
 
-    return templates.TemplateResponse("index.html", context)
+    response = templates.TemplateResponse("index.html", context)
+    response.set_cookie(key='fakesession', value='fake-session-value')
+    return response
 
 
+from fastapi import Cookie
+from typing import Annotated
+
+
+#@app.post("/send-ip/{test_tag}", response_class=HTMLResponse)
+#async def send_ip(test_tag: str, request: Request):
 @app.post("/send-ip", response_class=HTMLResponse)
-async def send_ip(request: Request):
+async def send_ip(request: Request, cookie_data: Annotated[str | None, Cookie()] = None):
     """
     Endpoint that sends the IP to Kafka and returns the updated UI part
     This is triggered by HTMX
     """
+    logging.info('HI HI')
+    logging.info(f'Cookie: {cookie_data}')
+    logging.info(f'{request.cookies}')
+    logging.info(f'{request.cookies.get("fakesession")}')
+    #logging.info(f'send-ip for {test_tag}')
     ip_address = get_client_ip(request)
     interaction = ClickInteraction(
         ip_address=ip_address, timestamp=datetime.datetime.now(datetime.timezone.utc)
