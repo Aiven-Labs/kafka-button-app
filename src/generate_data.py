@@ -53,6 +53,10 @@ KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 
+# A `cohort` value of None means that the data comes from this data generator
+FAKE_DATA_COHORT = None
+
+
 def generate_session() -> Iterator[Event]:
     """Yield button press message tuples from a single web app "session"
 
@@ -70,7 +74,7 @@ def generate_session() -> Iterator[Event]:
         #ip_address = fake.ipv4()
         ip_address = GEOIP.generate_random_ipv4_address()
 
-    event_creator = EventCreator(ip_address)
+    event_creator = EventCreator(ip_address, cohort=FAKE_DATA_COHORT)
 
     # We start with an EnterPage event
     enter_page = event_creator.enter_page()
