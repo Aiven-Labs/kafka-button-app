@@ -3,4 +3,3 @@ aiokafka
 python_dotenv
 geoip2fast
 avro
-httpx

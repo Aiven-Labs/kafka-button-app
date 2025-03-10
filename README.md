@@ -20,7 +20,11 @@ This project is a demonstration application for the Aiven for Apache Kafka Works
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.8-3.12
+
+> [!WARN]
+> There is a issue with the wheel for Python 3.13 that prevents SSL from working on Apple Silicon Macs.
+
 - An [Aiven for Apache Kafka](https://aiven.io/kafka) instance
 - SSL certificates for Kafka connection
 - Environment variables properly configured

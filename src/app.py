@@ -10,21 +10,22 @@ The following must be provided, either as environment variables or in a `.env` f
 * SCHEMA_REGISTRY_URI - the URI for the Karapace schema service
 """
 # main.py
+import json
 import pathlib
 import os
 from contextlib import asynccontextmanager
+import asyncio
 import datetime
 import logging
 import random
-from typing import Optional, Any
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 import dotenv
-from aiokafka import AIOKafkaProducer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import BackgroundTasks, FastAPI, Request, Cookie
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from geoip2fast import GeoIP2Fast
 from pydantic import BaseModel
@@ -33,43 +34,68 @@ from .button_responses import BUTTON_RESPONSES
 
 logging.basicConfig(level=logging.INFO)
 
-# The geoip2fast dataset we want to use. Note that this is one we need to
-# download ourselves.
-GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
-# If there's a `.env` file, load it.
-# If a value in the .env file already exists as a system environment variable,
-# then use the system value. Otherwise take the value from the .env file.
 dotenv.load_dotenv()
 
-KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI")
+GEOIP_DATASET_FILENAME = "geoip2fast-city-ipv6.dat.gz"
+KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9090")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
-
+SESSION_EXPIRY_SECONDS = 300  # 5 minutes
 CERTS_FOLDER = pathlib.Path("certs")
+SSL_CONTEXT = create_ssl_context(
+    cafile=CERTS_FOLDER / "ca.pem",
+    certfile=CERTS_FOLDER / "service.cert",
+    keyfile=CERTS_FOLDER / "service.key",
+)
+
+
+def json_deserializer(key_data):
+    if key_data is None:
+        return None
+    return json.loads(key_data.decode("utf-8"))
+
+
+key_deserializer = json_deserializer
+value_deserializer = json_deserializer
 
 
 async def start_producer() -> AIOKafkaProducer:
     """Start our Kafka producer."""
-    ssl_context = create_ssl_context(
-        cafile=CERTS_FOLDER / "ca.pem",
-        certfile=CERTS_FOLDER / "service.cert",
-        keyfile=CERTS_FOLDER / "service.key",
-    )
-
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_SERVICE_URI,
         security_protocol="SSL",
-        ssl_context=ssl_context,
+        ssl_context=SSL_CONTEXT,
     )
-    await producer.start()
     return producer
+
+
+async def start_consumer() -> AIOKafkaConsumer:
+    consumer = AIOKafkaConsumer(
+        "click_interactions",
+        bootstrap_servers=KAFKA_SERVICE_URI,
+        security_protocol="SSL",
+        ssl_context=SSL_CONTEXT,
+        key_deserializer=json_deserializer,
+        value_deserializer=json_deserializer,
+    )
+
+    await consumer.start()
+    await consumer.seek_to_beginning()
+    return consumer
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     app.producer = await start_producer()
-    yield
-    await app.producer.stop()
+    app.consumer = await start_consumer()
+
+    try:
+        yield
+    finally:
+        logging.info("Shutting Down Producer")
+        await app.producer.stop()
+        await app.consumer.stop()
 
 
 # Initialize FastAPI app
@@ -78,21 +104,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set up templates
-templates = Jinja2Templates(directory="templates")
-#app.mount("/static", StaticFiles(directory="static"), name="static")
-
-session = uuid4()
+# Initialize FastAPI app
+templates = Jinja2Templates(directory="src/templates")
 geoip = GeoIP2Fast()
 
 
 class ClickInteraction(BaseModel):
     ip_address: str
     timestamp: datetime.datetime
+    session: Optional[str] = None
     country: Optional[str] = None
     longitude: float = 0.0
     latitude: float = 0.0
-    session: UUID = session
 
     def model_post_init(self, __context: Any) -> None:
         """Performs a lookup at the user's IP Address and returns the country of the user"""
@@ -115,36 +138,91 @@ def get_client_ip(request: Request) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def get_index(request: Request):
+async def get_index(request: Request, session_id: UUID = Cookie(None)):
     """Render the main page with the button"""
 
     context = {
         "request": request,
-        "button_response": "Clicking this button does absolutely nothing.",
+        "button_response": "Clicking this button does absolutely nothing",
     }
 
-    return templates.TemplateResponse("index.html", context)
+    response = templates.TemplateResponse("index.html", context)
+
+    if session_id is None:
+        session_id = uuid4()
+
+    expires = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        seconds=SESSION_EXPIRY_SECONDS
+    )
+    response.set_cookie(
+        key="session_id",
+        value=str(session_id),
+        expires=expires,
+        max_age=SESSION_EXPIRY_SECONDS,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+
+    return response
+
+
+async def send_message(producer: AIOKafkaProducer, message: str):
+    await producer.send_and_wait("click_interactions", message)
 
 
 @app.post("/send-ip", response_class=HTMLResponse)
-async def send_ip(request: Request):
+async def send_ip(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     """
     Endpoint that sends the IP to Kafka and returns the updated UI part
     This is triggered by HTMX
     """
     ip_address = get_client_ip(request)
     interaction = ClickInteraction(
-        ip_address=ip_address, timestamp=datetime.datetime.now(datetime.timezone.utc)
+        ip_address=ip_address,
+        session=request.cookies["session_id"],
+        timestamp=datetime.datetime.now(datetime.timezone.utc),
     )
 
     # Send to Kafka
-    # Create message with IP and timestamp
-    message = interaction.model_dump_json(exclude=ip_address)
-    logging.info(message)
-    # Send to Kafka
+    message = interaction.model_dump_json(exclude={ip_address})
+    await send_message(app.producer, message)
 
     # Return only the updated part for HTMX to replace
-
     context = {"request": request, "button_response": random.choice(BUTTON_RESPONSES)}
 
     return templates.TemplateResponse("partials/button_text.html", context)
+
+
+async def get_messages(consumer):
+    """Consumes data from the topic and returns new lines as they come in"""
+
+    await consumer.seek_to_beginning()
+
+    try:
+        async for msg in consumer:
+            await asyncio.sleep(2.5)
+            yield f"data: {datetime.datetime.fromtimestamp(msg.timestamp/1000)}: {msg.value}\n\n"
+    except asyncio.CancelledError:
+        # Handle cancellation gracefully
+        yield """event: close
+                data: Connection closed by server\n\n"""
+        logging.info("Stream connection cancelled")
+        raise
+    finally:
+        # Clean up resources if needed
+        yield """event: close
+                data: Connection closed by server\n\n"""
+
+
+@app.get("/click-log", response_class=StreamingResponse)
+async def log_from_kafka():
+    response = StreamingResponse(
+        get_messages(consumer=app.consumer), media_type="text/event-stream"
+    )
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
