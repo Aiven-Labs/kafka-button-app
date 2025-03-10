@@ -3,6 +3,11 @@
 """An app to show a button that does "nothing", but does send events to Kafka.
 
 Run for development with `fastapi dev app.py`, run for real with `fastapi run app.py`
+
+The following must be provided, either as environment variables or in a `.env` file:
+
+* KAFKA_SERVICE_URI - the URI for the Kafka bootstrap server
+* SCHEMA_REGISTRY_URI - the URI for the Karapace schema service
 """
 # main.py
 import pathlib
@@ -27,20 +32,28 @@ from pydantic import BaseModel
 from .button_responses import BUTTON_RESPONSES
 
 logging.basicConfig(level=logging.INFO)
+
+# The geoip2fast dataset we want to use. Note that this is one we need to
+# download ourselves.
+GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
+
+# If there's a `.env` file, load it.
+# If a value in the .env file already exists as a system environment variable,
+# then use the system value. Otherwise take the value from the .env file.
 dotenv.load_dotenv()
 
-certs_folder = pathlib.Path("certs")
+KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI")
+SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
-KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
+CERTS_FOLDER = pathlib.Path("certs")
 
 
-
-async def start_producer():
-
+async def start_producer() -> AIOKafkaProducer:
+    """Start our Kafka producer."""
     ssl_context = create_ssl_context(
-        cafile=certs_folder / "ca.pem",
-        certfile=certs_folder / "service.cert",
-        keyfile=certs_folder / "service.key",
+        cafile=CERTS_FOLDER / "ca.pem",
+        certfile=CERTS_FOLDER / "service.cert",
+        keyfile=CERTS_FOLDER / "service.key",
     )
 
     producer = AIOKafkaProducer(
@@ -50,7 +63,6 @@ async def start_producer():
     )
     await producer.start()
     return producer
-
 
 
 @asynccontextmanager
