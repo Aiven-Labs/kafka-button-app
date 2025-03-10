@@ -10,6 +10,7 @@ import pprint
 import struct
 
 from enum import StrEnum
+from typing import Optional
 from uuid import UUID, uuid4
 
 import avro
@@ -29,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
 
-def load_geoip_data():
+def load_geoip_data() -> GeoIP2Fast:
     try:
         geoip = GeoIP2Fast(geoip2fast_data_file=GEOIP_DATASET_FILENAME)
     except Exception:
@@ -46,9 +47,6 @@ def load_geoip_data():
     pprint.pp(geoip.get_database_info())
 
     return geoip
-
-
-GEOIP = load_geoip_data()
 
 
 # We hard code the topic name.
@@ -71,6 +69,7 @@ class Action(StrEnum):
 class Event(BaseModel):
     session_id: str
     timestamp: str
+    cohort: int | None
     action: str
     count: int
     country_name: str
@@ -94,6 +93,7 @@ AVRO_SCHEMA = {
         {'name': 'subdivision_name', 'type': 'string'},
         {'name': 'subdivision_code', 'type': 'string'},
         {'name': 'city_name', 'type': 'string'},
+        {'name': 'cohort', 'type': ['null', 'int'], 'default': 'null'},
     ],
 }
 
@@ -171,14 +171,25 @@ class EventCreator:
     """A way of creating a sequence of linked events, with shared data.
     """
 
-    def __init__(self, ip_address: str):
-        """Perform the basic setup of a sequence of session events."""
+    def __init__(self, ip_address: str, geoip: GeoIP2Fast, cohort: Optional[int]=0):
+        """Perform the basic setup of a sequence of session events.
+
+        * `ip_address` is the IP address of the person pressing the button
+        * `geoip` is our GeoIP2Fast instance, which we use to look up IP addresses
+          and get back location data
+        * `cohort` is a way of identifying a group in which that person is placed
+          (one assumes a cohort of experimental subjects). The default it None.
+          A value of None means that this data is produced by the fake data
+          generator script.
+        """
 
         self.session_id = str(uuid4())
         logging.info(f'Session {self.session_id}')
 
+        self.cohort = cohort
+
         try:
-            geoip_data = GEOIP.lookup(ip_address)
+            geoip_data = geoip.lookup(ip_address)
         except GeoIPError as e:
             logging.error(f'IP lookup error: {e}')
             logging.error(f'Trying to lookup {ip_address}')
@@ -199,6 +210,7 @@ class EventCreator:
             session_id = self.session_id,
             timestamp = now,
             action = str(action),
+            cohort = self.cohort,
             count = self.count,
             country_name = self.country_name,
             country_code = self.country_code,

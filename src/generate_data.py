@@ -17,8 +17,8 @@ import dotenv
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
 import avro.schema
+from geoip2fast import GeoIP2Fast
 
-from message_support import GEOIP
 from message_support import TOPIC_NAME
 from message_support import Event
 from message_support import load_geoip_data
@@ -57,7 +57,7 @@ SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 FAKE_DATA_COHORT = None
 
 
-def generate_session() -> Iterator[Event]:
+def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
     """Yield button press message tuples from a single web app "session"
 
     Note we do *not* expose the IP address, as that counts as personal information.
@@ -69,12 +69,12 @@ def generate_session() -> Iterator[Event]:
 
     if random.randint(1,3) == 3:    # or some other distribution
         #ip_address = fake.ipv6()
-        ip_address = GEOIP.generate_random_ipv6_address()
+        ip_address = geoip.generate_random_ipv6_address()
     else:
         #ip_address = fake.ipv4()
-        ip_address = GEOIP.generate_random_ipv4_address()
+        ip_address = geoip.generate_random_ipv4_address()
 
-    event_creator = EventCreator(ip_address, cohort=FAKE_DATA_COHORT)
+    event_creator = EventCreator(ip_address, geoip, cohort=FAKE_DATA_COHORT)
 
     # We start with an EnterPage event
     enter_page = event_creator.enter_page()
@@ -109,6 +109,7 @@ async def send_messages_to_kafka(
         certs_dir: pathlib.Path,
         schema_id: int,
         parsed_schema: avro.schema.RecordSchema,
+        geoip: GeoIP2Fast,
 ):
     ssl_context = create_ssl_context(
         cafile=certs_dir / "ca.pem",
@@ -125,7 +126,7 @@ async def send_messages_to_kafka(
     await producer.start()
 
     try:
-        for event in generate_session():
+        for event in generate_session(geoip):
             print(f'EVENT {event}')
             raw_bytes = make_avro_payload(event, schema_id, parsed_schema)
             # For the moment, don't let it buffer messages
@@ -168,7 +169,7 @@ def main():
         logging.error('Set SCHEMA_REGISTRY_URI or use the -s switch')
         return -1
 
-    load_geoip_data()
+    geoip = load_geoip_data()
 
     # Parsing the schema both validates it, and also puts it into a form that
     # can be used when envoding/decoding message data
@@ -178,7 +179,7 @@ def main():
 
     with asyncio.Runner() as runner:
         runner.run(send_messages_to_kafka(
-            args.kafka_uri, args.certs_dir, schema_id, parsed_schema,
+            args.kafka_uri, args.certs_dir, schema_id, parsed_schema, geoip,
             ),
         )
 
