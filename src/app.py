@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+"""An app to show a button that does "nothing", but does send events to Kafka.
+
+Run for development with `fastapi dev app.py`, run for real with `fastapi run app.py`
+"""
 # main.py
 import pathlib
 import os
@@ -25,34 +31,44 @@ dotenv.load_dotenv()
 
 certs_folder = pathlib.Path("certs")
 
-KAFKA_BOOTSTRAP_SERVER = os.getenv("AIVEN_KAFKA_SERVICE_ENDPOINT_URI", "localhost:9093")
-ssl_context = create_ssl_context(
-    cafile=certs_folder / "ca.pem",
-    certfile=certs_folder / "service.cert",
-    keyfile=certs_folder / "service.key",
-)
+KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
 
-producer = AIOKafkaProducer(
-    bootstrap_servers=KAFKA_BOOTSTRAP_SERVER,
-    ssl_context=ssl_context,
-)
+
+
+async def start_producer():
+
+    ssl_context = create_ssl_context(
+        cafile=certs_folder / "ca.pem",
+        certfile=certs_folder / "service.cert",
+        keyfile=certs_folder / "service.key",
+    )
+
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_SERVICE_URI,
+        security_protocol="SSL",
+        ssl_context=ssl_context,
+    )
+    await producer.start()
+    return producer
+
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await producer.start()
+    app.producer = await start_producer()
     yield
-    await producer.stop()
+    await app.producer.stop()
 
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Don't Push the Button - Aiven for Apache Kafka Workshop", lifespan=lifespan
+    title="Don't Push the Button - Aiven for Apache Kafka Workshop",
+    lifespan=lifespan,
 )
 
-# Set up templates and static files
+# Set up templates
 templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+#app.mount("/static", StaticFiles(directory="static"), name="static")
 
 session = uuid4()
 geoip = GeoIP2Fast()

@@ -710,3 +710,12 @@ defaultdb=> select * from button_presses;
  35 | 4a80bd19-624f-4475-8cef-0091a042e78f | 2025-03-07T16:59:57.012865+00:00 | ExitPage    |     6 | India         | IN           |                  |                  |
 (35 rows)
 ```
+
+## Integrating all of that into the web app
+
+In the main directory:
+```
+fastapi dev src/app.py
+```
+
+(or, for more production-y use, `fastapi run src/app.py`)
