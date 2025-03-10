@@ -57,7 +57,7 @@ def load_geoip_data() -> GeoIP2Fast:
 #
 # Note that Avro schema names don't allow hyphens, and the JDBC connector
 # (at least by default) wants the topic name and schema name to match
-TOPIC_NAME = "button_presses"
+DEFAULT_TOPIC_NAME = "button_presses"
 
 
 class Action(StrEnum):
@@ -79,45 +79,45 @@ class Event(BaseModel):
     city_name: str           # may be ''
 
 
-AVRO_SCHEMA = {
-    'doc': 'Web app interactions',
-    'name': TOPIC_NAME,
-    'type': 'record',
-    'fields': [
-        {'name': 'session_id', 'type': 'string'},
-        {'name': 'timestamp', 'type': 'string'},
-        {'name': 'action', 'type': 'string'},
-        {'name': 'count', 'type': 'int'},
-        {'name': 'country_name', 'type': 'string'},
-        {'name': 'country_code', 'type': 'string'},
-        {'name': 'subdivision_name', 'type': 'string'},
-        {'name': 'subdivision_code', 'type': 'string'},
-        {'name': 'city_name', 'type': 'string'},
-        {'name': 'cohort', 'type': ['null', 'int'], 'default': 'null'},
-    ],
-}
+def create_avro_schema(topic_name: str=DEFAULT_TOPIC_NAME) -> str:
+    """When we *use* the Avro schema, we need it as a string.
+    """
+    schema = {
+        'doc': 'Web app interactions',
+        'name': topic_name,
+        'type': 'record',
+        'fields': [
+            {'name': 'session_id', 'type': 'string'},
+            {'name': 'timestamp', 'type': 'string'},
+            {'name': 'action', 'type': 'string'},
+            {'name': 'count', 'type': 'int'},
+            {'name': 'country_name', 'type': 'string'},
+            {'name': 'country_code', 'type': 'string'},
+            {'name': 'subdivision_name', 'type': 'string'},
+            {'name': 'subdivision_code', 'type': 'string'},
+            {'name': 'city_name', 'type': 'string'},
+            {'name': 'cohort', 'type': ['null', 'int'], 'default': 'null'},
+        ],
+    }
+    return json.dumps(schema)
 
 
-# When we're passing the Avro schema around, we need to pass it as a string
-AVRO_SCHEMA_AS_STR = json.dumps(AVRO_SCHEMA)
-
-
-def get_parsed_schema() -> avro.schema.RecordSchema:
+def get_parsed_avro_schema(schema_as_str: str) -> avro.schema.RecordSchema:
     # Parsing the schema both validates it, and also puts it into a form that
     # can be used when envoding/decoding message data
-    return avro.schema.parse(AVRO_SCHEMA_AS_STR)
+    return avro.schema.parse(schema_as_str)
 
 
-def register_schema(schema_uri: str) -> int:
+def register_avro_schema(schema_uri: str, schema_as_str: str, topic_name: str) -> int:
     """Register our schema with Karapace.
 
     Returns the schema id, which gets embedded into the messages.
     """
 
-    logging.info(f'Registering schema {TOPIC_NAME}-value')
+    logging.info(f'Registering schema {topic_name}-value')
     r = httpx.post(
-        f'{schema_uri}/subjects/{TOPIC_NAME}-value/versions',
-        json={"schema": AVRO_SCHEMA_AS_STR}
+        f'{schema_uri}/subjects/{topic_name}-value/versions',
+        json={"schema": schema_as_str}
     )
     r.raise_for_status()
 

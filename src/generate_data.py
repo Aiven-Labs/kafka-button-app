@@ -19,11 +19,12 @@ from aiokafka.helpers import create_ssl_context
 import avro.schema
 from geoip2fast import GeoIP2Fast
 
-from message_support import TOPIC_NAME
+from message_support import DEFAULT_TOPIC_NAME as TOPIC_NAME
 from message_support import Event
 from message_support import load_geoip_data
-from message_support import get_parsed_schema
-from message_support import register_schema
+from message_support import create_avro_schema
+from message_support import get_parsed_avro_schema
+from message_support import register_avro_schema
 from message_support import httpx
 from message_support import EventCreator
 from message_support import make_avro_payload
@@ -107,6 +108,7 @@ def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
 async def send_messages_to_kafka(
         kafka_uri: str,
         certs_dir: pathlib.Path,
+        topic_name: str,
         schema_id: int,
         parsed_schema: avro.schema.RecordSchema,
         geoip: GeoIP2Fast,
@@ -130,7 +132,7 @@ async def send_messages_to_kafka(
             print(f'EVENT {event}')
             raw_bytes = make_avro_payload(event, schema_id, parsed_schema)
             # For the moment, don't let it buffer messages
-            await producer.send_and_wait(TOPIC_NAME, raw_bytes)
+            await producer.send_and_wait(topic_name, raw_bytes)
     finally:
         await producer.stop()
 
@@ -171,15 +173,17 @@ def main():
 
     geoip = load_geoip_data()
 
+    schema = create_avro_schema(TOPIC_NAME)
+
     # Parsing the schema both validates it, and also puts it into a form that
     # can be used when envoding/decoding message data
-    parsed_schema = get_parsed_schema()
+    parsed_schema = get_parsed_avro_schema(schema)
 
-    schema_id = register_schema(args.schema_uri)
+    schema_id = register_avro_schema(args.schema_uri, schema, TOPIC_NAME)
 
     with asyncio.Runner() as runner:
         runner.run(send_messages_to_kafka(
-            args.kafka_uri, args.certs_dir, schema_id, parsed_schema, geoip,
+            args.kafka_uri, args.certs_dir, TOPIC_NAME, schema_id, parsed_schema, geoip,
             ),
         )
 
