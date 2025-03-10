@@ -719,3 +719,5 @@ fastapi dev src/app.py
 ```
 
 (or, for more production-y use, `fastapi run src/app.py`)
+
+...now working on making the app and the script share code...
