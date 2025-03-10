@@ -9,17 +9,20 @@ The following must be provided, either as environment variables or in a `.env` f
 * KAFKA_SERVICE_URI - the URI for the Kafka bootstrap server
 * SCHEMA_REGISTRY_URI - the URI for the Karapace schema service
 """
-# main.py
-import pathlib
-import os
-from contextlib import asynccontextmanager
+
 import datetime
 import logging
+import os
+import pathlib
 import random
+
+from contextlib import asynccontextmanager
 from typing import Optional, Any
 from uuid import UUID, uuid4
 
+import avro.schema
 import dotenv
+
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
 from fastapi import FastAPI, Request
@@ -30,6 +33,16 @@ from geoip2fast import GeoIP2Fast
 from pydantic import BaseModel
 
 from .button_responses import BUTTON_RESPONSES
+
+from .message_support import DEFAULT_TOPIC_NAME as TOPIC_NAME
+from .message_support import Event
+from .message_support import load_geoip_data
+from .message_support import create_avro_schema
+from .message_support import get_parsed_avro_schema
+from .message_support import register_avro_schema
+from .message_support import httpx
+from .message_support import EventCreator
+from .message_support import make_avro_payload
 
 logging.basicConfig(level=logging.INFO)
 
@@ -46,6 +59,19 @@ KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 CERTS_FOLDER = pathlib.Path("certs")
+
+
+class LifespanData:
+    producer: AIOKafkaProducer
+    geoip: GeoIP2Fast
+    avro_schema: str
+    parsed_avro_schema: avro.schema.RecordSchema
+    avro_schema_id: int
+
+
+lifespan_data = LifespanData()
+
+
 
 
 async def start_producer() -> AIOKafkaProducer:
@@ -65,9 +91,29 @@ async def start_producer() -> AIOKafkaProducer:
     return producer
 
 
+def setup_avro_schema():
+
+    lifespan_data.avro_schema = create_avro_schema(TOPIC_NAME)
+
+    # Parsing the schema both validates it, and also puts it into a form that
+    # can be used when envoding/decoding message data
+    lifespan_data.parsed_avro_schema = get_parsed_avro_schema(
+        lifespan_data.avro_schema,
+    )
+
+    lifespan_data.avro_schema_id = register_avro_schema(
+        SCHEMA_REGISTRY_URI,
+        lifespan_data.avro_schema,
+        TOPIC_NAME,
+    )
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.producer = await start_producer()
+    lifespan_data.geoip = load_geoip_data()
+    setup_avro_schema()
+    lifespan_data.producer = await start_producer()
     yield
     await app.producer.stop()
 
