@@ -2,9 +2,9 @@
 
 A fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka.
 
-> **Note** This branch is being used to develop the app -> Kafka -> PG connection.
->
-> Development notes are in the [working-document.md](working-document.md) file, and will act as the basis for actual documentation.
+If you want to play along, instructions are in [summary.md](summary.md). The intent is to fold them into this README at a later stage.
+
+Development notes are in the [working-document.md](working-document.md) file, and will act as the basis for actual documentation.
 
 ## Overview
 
