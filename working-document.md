@@ -829,3 +829,14 @@ and the `action` enum now only needs to be
 ```
 CREATE TYPE action as ENUM ('EnterPage', 'PressButton');
 ```
+
+
+For the existing database, we can leave the enum as it is, and
+```
+defaultdb=> alter table button_presses drop column count;
+```
+
+...and the app now sends Avro encoded messages to Kafka, which in turn end up
+in the PG database.
+
+So now to make all of that tidy!
