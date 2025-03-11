@@ -155,40 +155,68 @@ def get_client_ip(request: Request) -> str:
         # If no X-Forwarded-For header, use the direct client's IP
         return request.client.host if request.client else "unknown"
 
+
 import uuid
+from fastapi.responses import JSONResponse
+
+COOKIE_LIFETIME = 3600    # 1 hour
+
+
+@app.get("/reset", response_class=JSONResponse)
+async def reset(request: Request):
+    """For development/debugging - reset any cookies when we're visited"""
+
+    logging.info('HI HI RESET')
+    logging.info(f'request.cookies {request.cookies}')
+    logging.info(f'fakesession {request.cookies.get("fakesession")}')
+
+    logging.info('Expiring cookie values')
+
+    response = JSONResponse(content= {'message': 'Cookies unset'})
+    response.delete_cookie(key='fakesession')
+    return response
+
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     """Render the main page with the button"""
 
+    logging.info('HI HI INDEX')
+    logging.info(f'request.cookies {request.cookies}')
+
     context = {
         "request": request,
         "button_response": "Clicking this button does absolutely nothing.",
-        "uuid": str(uuid.uuid4()),
     }
 
     response = templates.TemplateResponse("index.html", context)
-    response.set_cookie(key='fakesession', value='fake-session-value')
+
+    fakesession = request.cookies.get("fakesession")
+    if fakesession:
+        logging.info(f'Already got fakesession {request.cookies.get("fakesession")}')
+    else:
+        logging.info(f'fakesession was {type(fakesession)}')
+        fakesession = str(uuid.uuid4())
+        logging.info(f'Setting new fakesession {fakesession}')
+        response.set_cookie(key='fakesession', value=fakesession, expires=COOKIE_LIFETIME)
     return response
 
 
-from fastapi import Cookie
-from typing import Annotated
-
-
-#@app.post("/send-ip/{test_tag}", response_class=HTMLResponse)
-#async def send_ip(test_tag: str, request: Request):
 @app.post("/send-ip", response_class=HTMLResponse)
-async def send_ip(request: Request, cookie_data: Annotated[str | None, Cookie()] = None):
+async def send_ip(request: Request):
     """
     Endpoint that sends the IP to Kafka and returns the updated UI part
     This is triggered by HTMX
     """
-    logging.info('HI HI')
-    logging.info(f'Cookie: {cookie_data}')
-    logging.info(f'{request.cookies}')
-    logging.info(f'{request.cookies.get("fakesession")}')
-    #logging.info(f'send-ip for {test_tag}')
+    logging.info('HI HI BUTTON')
+    logging.info(f'request.cookies {request.cookies}')
+
+    fakesession = request.cookies.get("fakesession")
+    if fakesession:
+        # Each time the button is pressed, extend the cookie lifetime
+        logging.info(f'Extending cookie lifetime')
+        response.set_cookie(key='fakesession', value=fakesession, expires=COOKIE_LIFETIME)
+
     ip_address = get_client_ip(request)
     interaction = ClickInteraction(
         ip_address=ip_address, timestamp=datetime.datetime.now(datetime.timezone.utc)
