@@ -8,10 +8,11 @@ import json
 import logging
 import pprint
 import struct
+import uuid
 
+from collections.abc import Callable
 from enum import StrEnum
-from typing import Optional
-from uuid import UUID, uuid4
+from typing import Optional, Any
 
 import avro
 import avro.io
@@ -63,6 +64,57 @@ DEFAULT_TOPIC_NAME = "button_presses"
 class Action(StrEnum):
     ENTER_PAGE = 'EnterPage'
     PRESS_BUTTON = 'PressButton'
+
+
+class Cookie(BaseModel):
+    session_id: str
+    cohort: int | None
+    country_name: str
+    country_code: str
+    subdivision_name: str    # may be ''
+    subdivision_code: str    # may be ''
+    city_name: str           # may be ''
+
+
+def new_cookie(
+        geoip: GeoIP2Fast,
+        get_ip_address: Callable[[GeoIP2Fast, Any],str],
+        request: Optional[Any]=None,
+        cohort: Optional[int]=0,
+) -> Cookie:
+    """Calculate the cookie for a new 'session'
+
+
+    * `geoip` is our GeoIP2Fast instance, which we use to look up IP addresses
+        and get back location data
+    * `get_ip_address` is a callable to get the IP address for this "session"
+    * `cohort` is a way of identifying a group in which that person is placed
+        (one assumes a cohort of experimental subjects). The default it None.
+        A value of None means that this data is produced by the fake data
+        generator script.
+    * `request` is the Request object in a real-life web app, and None otherwise.
+      We don't try to typecheck it here, as it's only the callable that might
+      care about it, and *that* might not actually want a Request after all,
+      and we don't know what *sort* of Request :)
+    """
+    ip_address = get_ip_address(geoip, request)
+
+    try:
+        geoip_data = geoip.lookup(ip_address)
+    except GeoIPError as e:
+        logging.error(f'IP lookup error: {e}')
+        logging.error(f'Trying to lookup {ip_address}')
+        raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
+
+    return Cookie(
+        session_id=str(uuid.uuid4()),
+        cohort=cohort,
+        country_name=geoip_data.country_name,
+        country_code=geoip_data.country_code,
+        subdivision_name=geoip_data.city.subdivision_name,
+        subdivision_code=geoip_data.city.subdivision_code,
+        city_name=geoip_data.city.name,
+    )
 
 
 class Event(BaseModel):
@@ -162,62 +214,3 @@ def make_avro_payload(
     raw_bytes = byte_data.getvalue()
 
     return raw_bytes
-
-
-class EventCreator:
-    """A way of creating a sequence of linked events, with shared data.
-    """
-
-    def __init__(self, ip_address: str, geoip: GeoIP2Fast, cohort: Optional[int]=0):
-        """Perform the basic setup of a sequence of session events.
-
-        * `ip_address` is the IP address of the person pressing the button
-        * `geoip` is our GeoIP2Fast instance, which we use to look up IP addresses
-          and get back location data
-        * `cohort` is a way of identifying a group in which that person is placed
-          (one assumes a cohort of experimental subjects). The default it None.
-          A value of None means that this data is produced by the fake data
-          generator script.
-        """
-
-        self.session_id = str(uuid4())
-        logging.info(f'Session {self.session_id}')
-
-        self.cohort = cohort
-
-        try:
-            geoip_data = geoip.lookup(ip_address)
-        except GeoIPError as e:
-            logging.error(f'IP lookup error: {e}')
-            logging.error(f'Trying to lookup {ip_address}')
-            raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
-
-        self.country_name = geoip_data.country_name
-        self.country_code = geoip_data.country_code
-        self.city_name = geoip_data.city.name
-        self.subdivision_name = geoip_data.city.subdivision_name
-        self.subdivision_code = geoip_data.city.subdivision_code
-
-    def new_event(self, action: Action) -> Event:
-        # Our "now" in UTC as an ISO format string
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return Event(
-            session_id = self.session_id,
-            timestamp = now,
-            action = str(action),
-            cohort = self.cohort,
-            country_name = self.country_name,
-            country_code = self.country_code,
-            subdivision_name = self.subdivision_name,
-            subdivision_code = self.subdivision_code,
-            city_name = self.city_name,
-        )
-
-    def enter_page(self) -> Event:
-        """Return our page entry event"""
-        # Because we're just entering the page, our count is 0
-        return self.new_event(Action.ENTER_PAGE)
-
-    def press_button(self) -> Event:
-        """Return a button press event"""
-        return self.new_event(Action.PRESS_BUTTON)

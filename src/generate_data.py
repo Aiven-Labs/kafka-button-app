@@ -10,7 +10,7 @@ import os
 import pathlib
 import random
 
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Any
 
 import dotenv
 
@@ -20,13 +20,13 @@ import avro.schema
 from geoip2fast import GeoIP2Fast
 
 from message_support import DEFAULT_TOPIC_NAME as TOPIC_NAME
+from message_support import Action
 from message_support import Event
+from message_support import new_cookie
 from message_support import load_geoip_data
 from message_support import create_avro_schema
 from message_support import get_parsed_avro_schema
 from message_support import register_avro_schema
-from message_support import httpx
-from message_support import EventCreator
 from message_support import make_avro_payload
 
 
@@ -58,6 +58,61 @@ SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 FAKE_DATA_COHORT = None
 
 
+def get_fake_ip_address(
+        geoip: GeoIP2Fast,
+        request: Any,
+) -> str:
+    if random.randint(1,3) == 3:    # or some other distribution
+        ip_address = geoip.generate_random_ipv6_address()
+    else:
+        ip_address = geoip.generate_random_ipv4_address()
+
+    logging.info(f'Using fake ip address {ip_address}')
+    try:
+        geoip_data = geoip.lookup(ip_address)
+    except GeoIPError as e:
+        logging.error(f'IP lookup error: {e}')
+        logging.error(f'Trying to lookup {ip_address}')
+        raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
+
+
+class FakeEventCreator:
+    """A way of creating a sequence of linked events, with shared data.
+    """
+
+    def __init__(self, geoip: GeoIP2Fast, cohort: Optional[int]=None):
+        """Perform the basic setup of a sequence of session events.
+
+        * `geoip` is our GeoIP2Fast instance, which we use to look up IP addresses
+          and get back location data
+        * `cohort` is a way of identifying a group in which that person is placed
+          (one assumes a cohort of experimental subjects). The default it None.
+          A value of None means that this data is produced by the fake data
+          generator script.
+        """
+        self.now = datetime.datetime.now(datetime.timezone.utc)
+        self.cookie = new_cookie(geoip, get_fake_ip_address, cohort)
+        logging.info(f'New "session" {self.cookie}')
+
+    def new_event(self, action: Action, elapsed_ms: int) -> Event:
+        """Move time fowards and return an Event
+        """
+        self.now = self.now + datetime.timedelta(milliseconds=elapsed_ms)
+        return Event(
+            **dict(self.cookie),
+            timestamp=self.now.isoformat(),
+            action = str(action),
+        )
+
+    def enter_page(self, elapsed_ms: int) -> Event:
+        """Return our page entry event"""
+        return self.new_event(Action.ENTER_PAGE, elapsed_ms)
+
+    def press_button(self, elapsed_ms: int) -> Event:
+        """Return a button press event"""
+        return self.new_event(Action.PRESS_BUTTON, elapsed_ms)
+
+
 def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
     """Yield button press message tuples from a single web app "session"
 
@@ -68,32 +123,16 @@ def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
     # connection, so let's not do that, at least for the moment. The consumer end can
     # worry about that.
 
-    if random.randint(1,3) == 3:    # or some other distribution
-        #ip_address = fake.ipv6()
-        ip_address = geoip.generate_random_ipv6_address()
-    else:
-        #ip_address = fake.ipv4()
-        ip_address = geoip.generate_random_ipv4_address()
-
-    event_creator = EventCreator(ip_address, geoip, cohort=FAKE_DATA_COHORT)
+    event_creator = FakeEventCreator(geoip, cohort=FAKE_DATA_COHORT)
 
     # We start with an EnterPage event
-    enter_page = event_creator.enter_page()
-    # But remember to use our own idea of what time it is
-    fake_now = datetime.datetime.now(datetime.timezone.utc)
-    enter_page.timestamp = fake_now.isoformat()
-    yield enter_page
+    yield event_creator.enter_page(0)
 
     # Luckily we're not trying to be especially random, so this is good enough
     number_presses = random.randint(1, 10)
     for press in range(number_presses):
-        fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
-        logging.info(f'Press {press} at {fake_now}')
-
-        press_button = event_creator.press_button()
-        # Pretend we have elapsed time between button presses
-        press_button.timestamp = fake_now.isoformat()
-        yield press_button
+        elapsed_ms = random.randint(500, 5000)
+        yield event_creator.press_button(elapsed_ms)
 
     logging.info('Left page')
 
