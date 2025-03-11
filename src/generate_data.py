@@ -58,18 +58,6 @@ SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 FAKE_DATA_COHORT = None
 
 
-def get_fake_ip_address(
-        geoip: GeoIP2Fast,
-        request: Any,
-) -> str:
-    if random.randint(1,3) == 3:    # or some other distribution
-        ip_address = geoip.generate_random_ipv6_address()
-    else:
-        ip_address = geoip.generate_random_ipv4_address()
-    logging.info(f'Using fake IP address {ip_address}')
-    return ip_address
-
-
 class FakeEventCreator:
     """A way of creating a sequence of linked events, with shared data.
     """
@@ -84,9 +72,20 @@ class FakeEventCreator:
           A value of None means that this data is produced by the fake data
           generator script.
         """
+        self.geoip = geoip
         self.now = datetime.datetime.now(datetime.timezone.utc)
-        self.cookie = new_cookie(geoip, get_fake_ip_address, cohort)
+        self.cookie = new_cookie(geoip, self.get_fake_ip_address, cohort)
         logging.info(f'New "session" {self.cookie}')
+
+    def get_fake_ip_address(self, request: Any) -> str:
+        """This fake IP address creator doesn't need a "Request" parameter.
+        """
+        if random.randint(1,3) == 3:    # or some other distribution
+            ip_address = self.geoip.generate_random_ipv6_address()
+        else:
+            ip_address = self.geoip.generate_random_ipv4_address()
+        logging.info(f'Using fake IP address {ip_address}')
+        return ip_address
 
     def new_event(self, action: Action, elapsed_ms: int) -> Event:
         """Move time fowards and return an Event

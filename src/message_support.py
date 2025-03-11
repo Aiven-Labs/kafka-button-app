@@ -78,7 +78,7 @@ class Cookie(BaseModel):
 
 def new_cookie(
         geoip: GeoIP2Fast,
-        get_ip_address: Callable[[GeoIP2Fast, Any],str],
+        get_ip_address: Callable[[Any],str],
         request: Optional[Any]=None,
         cohort: Optional[int]=0,
 ) -> Cookie:
@@ -87,7 +87,8 @@ def new_cookie(
 
     * `geoip` is our GeoIP2Fast instance, which we use to look up IP addresses
         and get back location data
-    * `get_ip_address` is a callable to get the IP address for this "session"
+    * `get_ip_address` is a callable to get the IP address for this "session",
+      It expects to be passed the `request` argument (for which see below).
     * `cohort` is a way of identifying a group in which that person is placed
         (one assumes a cohort of experimental subjects). The default it None.
         A value of None means that this data is produced by the fake data
@@ -97,7 +98,7 @@ def new_cookie(
       care about it, and *that* might not actually want a Request after all,
       and we don't know what *sort* of Request :)
     """
-    ip_address = get_ip_address(geoip, request)
+    ip_address = get_ip_address(request)
 
     try:
         geoip_data = geoip.lookup(ip_address)

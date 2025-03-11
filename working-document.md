@@ -840,3 +840,34 @@ defaultdb=> alter table button_presses drop column count;
 in the PG database.
 
 So now to make all of that tidy!
+
+## How the app works
+
+When you start the app
+```
+fastapi dev src/app.py
+```
+
+you can go to the initial page at http://localhost:8000/, which has a button.
+
+An EnterPage Kafka message will also be sent, containing a "session" UUID and information
+derived from the IP address of the viewer.
+
+> **Note** that at the moment, if that IP address is actually 127.0.0.1
+> (localhost) then a fake IP address will be generated instead.
+
+The "session" id and location information will also be saved in a cookie.
+
+When you press the button, a ButtonPress event will be sent.
+
+If you want to clear the cookies, go to http://localhost:8000/reset
+
+There's a convenient link there to go back to the main page :)
+
+Note that we don't have any "this app is using cookies" message - I don't
+believe we need such, but maybe should check :(
+
+Lots of stuff is logged, so you can tell what is going on.
+
+To send fake data, you can still run `src/generate_data.py` (it will give help
+if you pass `--help`). It and the app use the same code to create the messsages.

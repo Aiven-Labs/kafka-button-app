@@ -35,14 +35,14 @@ from pydantic import BaseModel
 from .button_responses import BUTTON_RESPONSES
 
 from .message_support import DEFAULT_TOPIC_NAME as TOPIC_NAME
+from .message_support import Cookie
 from .message_support import Action
 from .message_support import Event
+from .message_support import new_cookie
 from .message_support import load_geoip_data
 from .message_support import create_avro_schema
 from .message_support import get_parsed_avro_schema
 from .message_support import register_avro_schema
-from .message_support import httpx
-from .message_support import EventCreator
 from .message_support import make_avro_payload
 
 logging.basicConfig(level=logging.INFO)
@@ -171,39 +171,11 @@ DEFAULT_COHORT = 0
 FAKE_DATA = True
 
 
-class Cookie(BaseModel):
-    session_id: str
-    cohort: int | None
-    country_name: str
-    country_code: str
-    subdivision_name: str    # may be ''
-    subdivision_code: str    # may be ''
-    city_name: str           # may be ''
-
-
-def new_cookie(request: Request) -> Cookie:
-    """Calculate the cookie for a new 'session'
-    """
+def get_ip_address(request: Request) -> str:
     ip_address = get_client_ip(request)
     if FAKE_DATA and ip_address == '127.0.0.1':
         # Because localhost isn't much fun...
         ip_address = lifespan_data.geoip.generate_random_ipv4_address()
-    try:
-        geoip_data = lifespan_data.geoip.lookup(ip_address)
-    except GeoIPError as e:
-        logging.error(f'IP lookup error: {e}')
-        logging.error(f'Trying to lookup {ip_address}')
-        raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
-
-    return Cookie(
-        session_id=str(uuid.uuid4()),
-        cohort=DEFAULT_COHORT,
-        country_name=geoip_data.country_name,
-        country_code=geoip_data.country_code,
-        subdivision_name=geoip_data.city.subdivision_name,
-        subdivision_code=geoip_data.city.subdivision_code,
-        city_name=geoip_data.city.name,
-    )
 
 
 async def send_avro_message(cookie: Cookie, action: Action):
@@ -251,14 +223,14 @@ def get_cookie_from_request(request: Request) -> Cookie:
     cookie_str = request.cookies.get(COOKIE_NAME)
     if not cookie_str:
         logging.info(f'No cookie found: making new')
-        cookie = new_cookie(request)
+        cookie = new_cookie(lifespan_data.geoip, get_ip_address, request, DEFAULT_COHORT)
     else:
         logging.info(f'Found cookie value {cookie_str}')
         try:
             cookie = Cookie.model_validate_json(cookie_str)
         except ValidationError:
             logging.error(f'Unable to parse cookie {COOKIE_NAME} value {cookie_str}')
-            cookie = new_cookie(request)
+            cookie = new_cookie(lifespan_data.geoip, get_ip_address, request, DEFAULT_COHORT)
     return cookie
 
 
@@ -272,7 +244,8 @@ async def get_index(request: Request):
     cookie = get_cookie_from_request(request)
 
     # Send our actual message to Kafka
-    await send_avro_message(cookie, Action.PRESS_BUTTON)
+    # The user has either come to this page for the first time, or they've refreshed it
+    await send_avro_message(cookie, Action.ENTER_PAGE)
 
     context = {
         "request": request,
@@ -306,7 +279,7 @@ async def send_ip(request: Request):
     )
 
     # Send our actual message to Kafka
-    await send_avro_message(cookie, Action.ENTER_PAGE)
+    await send_avro_message(cookie, Action.PRESS_BUTTON)
 
     # Return only the updated part for HTMX to replace
     context = {
