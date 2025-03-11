@@ -8,55 +8,6 @@
 ; pip install -r requirements.txt
 ```
 
-At the moment, the script is just printing stuff out
-```
-; src/generate_data.py
-Database info:
-{'database_content': 'Country + City with IPv4 and IPv6',
- 'database_fullpath': '/Users/tony.ibbs/sw/aiven/Aiven-Labs/kafka-button-app/venv/lib/python3.11/site-packages/geoip2fast/geoip2fast-city-ipv6.dat.gz',
- 'file_size': 14635455,
- 'uncompressed_file_size': 80909989,
- 'source_info': 'MAXMIND:GeoLite2-City-IPv4IPv6-en-20250228',
- 'dat_version': 120,
- 'city': {'main_index_size': 50070,
-          'first_ip_list_size': 5006990,
-          'city_names_id_list_size': 5006990,
-          'netlength_list_size': 5006990,
-          'country_names': 268,
-          'city_names': 77730,
-          'ipv4_networks': 3267030,
-          'ipv6_networks': 1739960,
-          'number_of_chunks': 50070,
-          'chunk_size': 100}}
-INFO:root:Session e0569750-8c8e-42a8-83fd-d9ad310162b5
-INFO:root:IP 199.250.231.120 -> United States, US (Nahunta, Georgia, GA
-{
-   "ip": "199.250.231.120",
-   "country_code": "US",
-   "country_name": "United States",
-   "city": {
-      "name": "Nahunta",
-      "subdivision_code": "GA",
-      "subdivision_name": "Georgia",
-      "latitude": null,
-      "longitude": null
-   },
-   "cidr": "199.250.224.0/20",
-   "hostname": "",
-   "asn_name": "",
-   "asn_cidr": "",
-   "is_private": false,
-   "elapsed_time": "0.000060584 sec"
-}
-INFO:root:Press 0 at 1741175477.503385
-INFO:root:Press 1 at 1741178088.503385
-INFO:root:Press 2 at 1741181168.503385
-INFO:root:Press 3 at 1741183990.503385
-INFO:root:Press 4 at 1741185172.503385
-INFO:root:Press 5 at 1741187857.503385
-INFO:root:Press 6 at 1741191683.503385
-```
-
 ## Kafka setup
 
 For the moment, I'm going to do things with the `avn` command
