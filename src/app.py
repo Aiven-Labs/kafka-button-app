@@ -18,7 +18,6 @@ import random
 
 from contextlib import asynccontextmanager
 from typing import Optional, Any
-from uuid import UUID, uuid4
 
 import avro.schema
 import dotenv
@@ -31,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from geoip2fast import GeoIP2Fast
 from pydantic import BaseModel
+from pydantic import ValidationError
 
 from .button_responses import BUTTON_RESPONSES
 
@@ -60,6 +60,15 @@ KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 CERTS_FOLDER = pathlib.Path("certs")
+
+COOKIE_NAME = 'button_press_session'
+COOKIE_LIFETIME = 3600    # 1 hour
+
+DEFAULT_COHORT = 0
+
+# If this is True, and the apparent IP address is 127.0.0.1 (localhost),
+# then generate a fake IP address instead
+FAKE_DATA = True
 
 
 class LifespanData:
@@ -125,25 +134,6 @@ app = FastAPI(
 # Set up templates
 templates = Jinja2Templates(directory="templates")
 
-session = uuid4()
-
-
-class ClickInteraction(BaseModel):
-    ip_address: str
-    timestamp: datetime.datetime
-    country: Optional[str] = None
-    longitude: float = 0.0
-    latitude: float = 0.0
-    session: UUID = session
-
-    def model_post_init(self, __context: Any) -> None:
-        """Performs a lookup at the user's IP Address and returns the country of the user"""
-        lookup = lifespan_data.geoip.lookup(self.ip_address)
-
-        self.country = lookup.country_name
-        self.longitude = 0.0
-        self.latitude = 0.0
-
 
 def get_client_ip(request: Request) -> str:
     """Extract client IP address from request"""
@@ -154,21 +144,6 @@ def get_client_ip(request: Request) -> str:
     else:
         # If no X-Forwarded-For header, use the direct client's IP
         return request.client.host if request.client else "unknown"
-
-
-# These will get moved to the top (or deleted if not needed) when things are working
-import json
-import uuid
-from fastapi.responses import JSONResponse
-from geoip2fast.geoip2fast import GeoIPError
-from pydantic import ValidationError
-
-COOKIE_NAME = 'button_press_session'
-COOKIE_LIFETIME = 3600    # 1 hour
-
-DEFAULT_COHORT = 0
-
-FAKE_DATA = True
 
 
 def get_ip_address(request: Request) -> str:
@@ -274,9 +249,6 @@ async def send_ip(request: Request):
     cookie = get_cookie_from_request(request)
 
     ip_address = get_client_ip(request)
-    interaction = ClickInteraction(
-        ip_address=ip_address, timestamp=datetime.datetime.now(datetime.timezone.utc)
-    )
 
     # Send our actual message to Kafka
     await send_avro_message(cookie, Action.PRESS_BUTTON)
