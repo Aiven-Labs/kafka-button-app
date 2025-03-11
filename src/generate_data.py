@@ -66,14 +66,8 @@ def get_fake_ip_address(
         ip_address = geoip.generate_random_ipv6_address()
     else:
         ip_address = geoip.generate_random_ipv4_address()
-
-    logging.info(f'Using fake ip address {ip_address}')
-    try:
-        geoip_data = geoip.lookup(ip_address)
-    except GeoIPError as e:
-        logging.error(f'IP lookup error: {e}')
-        logging.error(f'Trying to lookup {ip_address}')
-        raise ValueError('Unable to retrieve IP data {e} for {ip_address}')
+    logging.info(f'Using fake IP address {ip_address}')
+    return ip_address
 
 
 class FakeEventCreator:
