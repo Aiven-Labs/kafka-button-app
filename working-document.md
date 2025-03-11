@@ -768,9 +768,64 @@ Indexes:
 > **Note** Because I set the JDBC connector to disallow schema evolution, I
 > had to restart the connector. 
 
-## More refactoring
+### More refactoring
 
 The code in [`src/message_support/py`](src/message_support.py) (honestly, not
 a great name for the file), which is the code used in the fake message script,
 should now be suitable for using in the app, at least to a first
 approximation.
+
+### And cookie support
+
+The easiest way to handle "sessions" is to use cookies. Actual sessions are
+overkill.
+
+However, that means:
+
+* No way to tell when a user "session" ends, as there's now obvious way to
+  tell when the window is closed
+* We *can* time the cookie out, and we can refresh it when the user interacts
+  with the page
+* That also means the `count` field isn't useful any more
+* We *can* still produce an event when the user first sets the cookie, which
+  should be their first visit to the index page, modulo cookie expiration. Is
+  that still worth having?
+
+For the moment, the cookie contents is:
+```python
+class Cookie(BaseModel):
+    session_id: str
+    cohort: int | None
+    country_name: str
+    country_code: str
+    subdivision_name: str    # may be ''
+    subdivision_code: str    # may be ''
+    city_name: str           # may be ''
+```
+
+Doing all of this will mean
+1. Changing the PG schema, and the Karapace schema
+2. Changing how the fake data script works (a little)
+3. Doubtless some refactoring around the shared code to make it sensible.
+
+Our PG table will now need to look like:
+```
+CREATE TABLE button_presses (
+    "id" bigint generated always as identity primary key,
+    "session_id" uuid not null,
+    "timestamp" char(32) not null,
+    "cohort" smallint,
+    "action" text not null,
+    "country_name" text not null,
+    "country_code" char(2) not null,
+    "subdivision_name" text,
+    "subdivision_code" text,
+    "city_name" text
+);
+```
+
+and the `action` enum now only needs to be
+
+```
+CREATE TYPE action as ENUM ('EnterPage', 'PressButton');
+```

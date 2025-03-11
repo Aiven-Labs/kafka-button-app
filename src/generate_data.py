@@ -95,14 +95,8 @@ def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
         press_button.timestamp = fake_now.isoformat()
         yield press_button
 
-    logging.info(f'Leave page at {fake_now}')
+    logging.info('Left page')
 
-    # And at the end, the event `count` field reflects the total number of events for this session
-    exit_page = event_creator.exit_page()
-    # Remember we're pretending time is elapsing
-    fake_now += datetime.timedelta(milliseconds=random.randint(500, 5000))
-    exit_page.timestamp = fake_now.isoformat()
-    yield exit_page
 
 
 async def send_messages_to_kafka(

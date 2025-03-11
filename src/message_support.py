@@ -63,7 +63,6 @@ DEFAULT_TOPIC_NAME = "button_presses"
 class Action(StrEnum):
     ENTER_PAGE = 'EnterPage'
     PRESS_BUTTON = 'PressButton'
-    EXIT_PAGE = 'ExitPage'
 
 
 class Event(BaseModel):
@@ -71,7 +70,6 @@ class Event(BaseModel):
     timestamp: str
     cohort: int | None
     action: str
-    count: int
     country_name: str
     country_code: str
     subdivision_name: str    # may be ''
@@ -90,7 +88,6 @@ def create_avro_schema(topic_name: str=DEFAULT_TOPIC_NAME) -> str:
             {'name': 'session_id', 'type': 'string'},
             {'name': 'timestamp', 'type': 'string'},
             {'name': 'action', 'type': 'string'},
-            {'name': 'count', 'type': 'int'},
             {'name': 'country_name', 'type': 'string'},
             {'name': 'country_code', 'type': 'string'},
             {'name': 'subdivision_name', 'type': 'string'},
@@ -201,8 +198,6 @@ class EventCreator:
         self.subdivision_name = geoip_data.city.subdivision_name
         self.subdivision_code = geoip_data.city.subdivision_code
 
-        self.count = 0
-
     def new_event(self, action: Action) -> Event:
         # Our "now" in UTC as an ISO format string
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -211,7 +206,6 @@ class EventCreator:
             timestamp = now,
             action = str(action),
             cohort = self.cohort,
-            count = self.count,
             country_name = self.country_name,
             country_code = self.country_code,
             subdivision_name = self.subdivision_name,
@@ -222,16 +216,8 @@ class EventCreator:
     def enter_page(self) -> Event:
         """Return our page entry event"""
         # Because we're just entering the page, our count is 0
-        self.count = 0
         return self.new_event(Action.ENTER_PAGE)
 
     def press_button(self) -> Event:
         """Return a button press event"""
-        self.count += 1
         return self.new_event(Action.PRESS_BUTTON)
-
-
-    def exit_page(self) -> Event:
-        """Return our page exit event"""
-        self.count += 1
-        return self.new_event(Action.EXIT_PAGE)
