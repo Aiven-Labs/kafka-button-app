@@ -156,10 +156,37 @@ def get_client_ip(request: Request) -> str:
         return request.client.host if request.client else "unknown"
 
 
+import json
 import uuid
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
+COOKIE_NAME = 'button_press_session'
 COOKIE_LIFETIME = 3600    # 1 hour
+
+DEFAULT_COHORT = 0
+
+
+class Cookie(BaseModel):
+    session_id: str
+    cohort: int | None
+    country_name: str
+    country_code: str
+    subdivision_name: str    # may be ''
+    subdivision_code: str    # may be ''
+    city_name: str           # may be ''
+
+
+def new_cookie():
+    return Cookie(
+        session_id=str(uuid.uuid4()),
+        cohort=DEFAULT_COHORT,
+        country_name='France',
+        country_code='FR',
+        subdivision_name='',
+        subdivision_code='',
+        city_name='',
+    )
 
 
 @app.get("/reset", response_class=JSONResponse)
@@ -168,12 +195,12 @@ async def reset(request: Request):
 
     logging.info('HI HI RESET')
     logging.info(f'request.cookies {request.cookies}')
-    logging.info(f'fakesession {request.cookies.get("fakesession")}')
+    logging.info(f'cookie {request.cookies.get(COOKIE_NAME)}')
 
     logging.info('Expiring cookie values')
 
     response = JSONResponse(content= {'message': 'Cookies unset'})
-    response.delete_cookie(key='fakesession')
+    response.delete_cookie(key=COOKIE_NAME)
     return response
 
 
@@ -191,14 +218,18 @@ async def get_index(request: Request):
 
     response = templates.TemplateResponse("index.html", context)
 
-    fakesession = request.cookies.get("fakesession")
-    if fakesession:
-        logging.info(f'Already got fakesession {request.cookies.get("fakesession")}')
+    cookie_str = request.cookies.get(COOKIE_NAME)
+    if cookie_str:
+        logging.info(f'Already got cookie {request.cookies.get(COOKIE_NAME)}')
+        # Each time the page is visited/refreshed, extend the cookie lifetime
+        logging.info(f'Extending cookie lifetime')
+        response.set_cookie(key=COOKIE_NAME, value=cookie_str, expires=COOKIE_LIFETIME)
     else:
-        logging.info(f'fakesession was {type(fakesession)}')
-        fakesession = str(uuid.uuid4())
-        logging.info(f'Setting new fakesession {fakesession}')
-        response.set_cookie(key='fakesession', value=fakesession, expires=COOKIE_LIFETIME)
+        cookie = new_cookie()
+        cookie_str = cookie.model_dump_json()
+        logging.info(f'Setting new cookie {cookie_str}')
+        response.set_cookie(key=COOKIE_NAME, value=cookie_str, expires=COOKIE_LIFETIME)
+
     return response
 
 
@@ -211,11 +242,17 @@ async def send_ip(request: Request):
     logging.info('HI HI BUTTON')
     logging.info(f'request.cookies {request.cookies}')
 
-    fakesession = request.cookies.get("fakesession")
-    if fakesession:
-        # Each time the button is pressed, extend the cookie lifetime
-        logging.info(f'Extending cookie lifetime')
-        response.set_cookie(key='fakesession', value=fakesession, expires=COOKIE_LIFETIME)
+    cookie_str = request.cookies.get(COOKIE_NAME)
+    if cookie_str:
+        logging.info(f'Unpacking cookie {COOKIE_NAME} value {cookie_str!r}')
+        try:
+            cookie = Cookie.model_validate_json(cookie_str)
+        except ValidationError:
+            logging.error(f'Unable to parse cookie {COOKIE_NAME} value {cookie_str}')
+            cookie = new_cookie()
+    else:
+        # Can this happen? Let's cope if it does
+        cookie = new_cookie()
 
     ip_address = get_client_ip(request)
     interaction = ClickInteraction(
@@ -231,5 +268,11 @@ async def send_ip(request: Request):
     # Return only the updated part for HTMX to replace
 
     context = {"request": request, "button_response": random.choice(BUTTON_RESPONSES)}
+    response = templates.TemplateResponse("partials/button_text.html", context)
 
-    return templates.TemplateResponse("partials/button_text.html", context)
+    # Each time the button is pressed, extend the cookie lifetime
+    logging.info(f'Extending cookie lifetime')
+    cookie_str = cookie.model_dump_json()
+    response.set_cookie(key=COOKIE_NAME, value=cookie_str, expires=COOKIE_LIFETIME)
+
+    return response
