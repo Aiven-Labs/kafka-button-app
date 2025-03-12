@@ -3,6 +3,9 @@ certs/
 # JSON files we use for Kafka connector definitions
 *.json
 
+# A locally installed clickhouse binary
+clickhouse
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
