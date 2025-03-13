@@ -425,8 +425,6 @@ Lots of stuff is logged, so you can tell what is going on.
 
 ## Sending data to ClickHouse using the ClickHouse integration
 
-> **Note** More explanatory text is needed!
-
 ```
 set -x CH_SERVICE_NAME tibs-button-ch
 ```
