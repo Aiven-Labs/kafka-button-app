@@ -151,6 +151,8 @@ def get_ip_address(request: Request) -> str:
     if FAKE_DATA and ip_address == '127.0.0.1':
         # Because localhost isn't much fun...
         ip_address = lifespan_data.geoip.generate_random_ipv4_address()
+        logging.info(f"We're at 1227.0.0.1 which is boring; pretending to be at {ip_address}")
+    return ip_address
 
 
 async def send_avro_message(cookie: Cookie, action: Action):
