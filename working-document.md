@@ -1635,3 +1635,281 @@ I'm still getting errors about schema id 6 in the ClickHouse log, presumably
 because it's trying to read old messages.
 
 Let's "restart" the topic again (as we did earlier)
+
+**And now I see  the data in ClickHouse!**
+
+From the data generator
+```
+EVENT session_id='67b922f3-674c-4542-92f3-d20a75a55ea9' timestamp=1741859682470739 cohort=0 action='EnterPage' country_name='United States' country_code='US' subdivision_name='' subdivision_code='' city_name=''
+EVENT session_id='67b922f3-674c-4542-92f3-d20a75a55ea9' timestamp=1741859684450739 cohort=0 action='PressButton' country_name='United States' country_code='US' subdivision_name='' subdivision_code='' city_name=''
+EVENT session_id='67b922f3-674c-4542-92f3-d20a75a55ea9' timestamp=1741859685336739 cohort=0 action='PressButton' country_name='United States' country_code='US' subdivision_name='' subdivision_code='' city_name=''
+```
+
+and in ClickHouse
+```
+tibs-button-ch-1 :) select * from button_presses
+
+SELECT *
+FROM button_presses
+
+Query id: 82100a27-c8a1-4934-a969-7bb3a90dcc93
+
+   ┌─session_id───────────────────────────┬───────────timestamp─┬─action──────┬─country_name──┬─country_code─┬─subdivision_name─┬─subdivision_code─┬─city_name─┬─cohort─┐
+1. │ 67b922f3-674c-4542-92f3-d20a75a55ea9 │ 2012-05-01 02:32:51 │ EnterPage   │ United States │ US           │                  │                  │           │      0 │
+2. │ 67b922f3-674c-4542-92f3-d20a75a55ea9 │ 2012-05-24 00:32:51 │ PressButton │ United States │ US           │                  │                  │           │      0 │
+3. │ 67b922f3-674c-4542-92f3-d20a75a55ea9 │ 2012-06-03 06:39:31 │ PressButton │ United States │ US           │                  │                  │           │      0 │
+   └──────────────────────────────────────┴─────────────────────┴─────────────┴───────────────┴──────────────┴──────────────────┴──────────────────┴───────────┴────────┘
+
+3 rows in set. Elapsed: 0.003 sec.
+```
+
+The only problem now is those timestamps.
+
+For instance, in PG I (from button presses) the sequence
+
+* 1741860319162807
+* 1741860322762046
+* 1741860323560839
+* 1741860324045622
+
+but in ClickHouse I see
+
+* 2032-07-04 05:27:19
+* 2032-08-14 21:14:38
+* 2032-08-24 03:07:51
+* 2032-08-29 17:47:34
+
+(not necessarily in the same order, but with the same session id, and the
+first one *is* the first one because it's a PageEntry event).
+
+https://clickhouse.com/docs/sql-reference/data-types/datetime indicates that
+we *can* input a DateTime as an integer, and that `DateTime('UTC')` should
+indicate that it's in that timezone.
+
+Both the service table and the button presses table have the column with that type.
+
+https://clickhouse.com/docs/interfaces/formats/AvroConfluent shows that Avro
+schema `long (timestamp-micros)` should become the ClickHouse data type
+`DateTime64(6)`. The `6` is presumably meant to indicate that there are 6
+digits of fractional time (so `microseconds`). But the DateTime documentation
+doesn't mention that usage - it only shows the timezone as a parameter for `DateTime`.
+
+So **maybe** the time being used as `DateTime('UTC')` is the problem, and it
+should be specified as `DateTime64(6)`.
+
+
+-----
+
+Hmm. If I go to my Kafka service in the console, and go to the Connectors tab,
+and choose a ClickHouse connector, and then choose `Key converter class` as
+`io.confluent.connect.avro.AvroConverter` then I get fields in which I can put
+the schema information.
+
+**Presumably** I should be able to do this via the command line as well...
+
+...oh, as part of `CREATE TABLE` for the service table.
+
+Let's make a clean slate - stop the ClickHouse integration and destroy various
+tables I have in ClickHouse, then restart and recreate stuff.
+
+* Stop the integration using the console.
+* `drop table materialised_view`
+* `drop table button_presses`
+* Because we've stopped the integration, the database
+  `service_tibs-button-kafka` has gone away (it's no longer in `show databases`)
+  
+Change the line in kafka-ch-integration-config.json to use the correct
+data/time format:
+```json
+{
+    "tables": [
+        {
+            "name": "button_presses_from_kafka",
+            "columns": [
+                {"name": "session_id", "type": "UUID"},
+                {"name": "timestamp", "type": "DateTime('UTC')"},
+                {"name": "action", "type": "String"},
+                {"name": "country_name", "type": "String"},
+                {"name": "country_code", "type": "FixedString(2)"},
+                {"name": "subdivision_name", "type": "String"},
+                {"name": "subdivision_code", "type": "String"},
+                {"name": "city_name", "type": "String"},
+                {"name": "cohort", "type": "Nullable(Smallint)"}
+            ],
+            "topics": [{"name": "button_presses"}],
+            "data_format": "AvroConfluent",
+            "group_name": "button_presses_from_kafka_consumer"
+        }
+    ]
+}
+```
+
+Create and update the integration, as before
+```
+avn service integration-create            \
+    --integration-type clickhouse_kafka   \
+    --source-service $KAFKA_SERVICE_NAME\
+    --dest-service $CH_SERVICE_NAME
+```
+
+```
+set -x KAFKA_CH_SERVICE_INTEGRATION_ID (avn service integration-list $CH_SERVICE_NAME --json | jq -r '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id')
+```
+
+Now `show databases` shows the service database
+```
+tibs-button-ch-1 :) show databases
+
+SHOW DATABASES
+
+Query id: 4a20ffad-4dc4-41bf-b6ba-ac152436fc8f
+
+Connecting to tibs-button-ch-devrel-tibs.b.aivencloud.com:10143 as user avnadmin.
+Connected to ClickHouse server version 24.8.13.
+
+ClickHouse server version is older than ClickHouse client. It may indicate that the server is out of date and can be upgraded.
+
+   ┌─name──────────────────────┐
+1. │ INFORMATION_SCHEMA        │
+2. │ default                   │
+3. │ information_schema        │
+4. │ service_tibs-button-kafka │
+5. │ system                    │
+   └───────────────────────────┘
+
+5 rows in set. Elapsed: 0.001 sec.
+```
+
+```
+avn service integration-update \
+    $KAFKA_CH_SERVICE_INTEGRATION_ID \
+    --user-config-json @kafka-ch-integration-config.json
+```
+
+```
+tibs-button-ch-1 :) show tables from `service_tibs-button-kafka`
+
+SHOW TABLES FROM `service_tibs-button-kafka`
+
+Query id: b8eeb8f7-dfe8-4a18-8938-28f8abcde1b5
+
+   ┌─name──────────────────────┐
+1. │ button_presses_from_kafka │
+   └───────────────────────────┘
+
+1 row in set. Elapsed: 0.002 sec.
+
+tibs-button-ch-1 :) describe `service_tibs-button-kafka`.button_presses_from_kafka
+
+DESCRIBE TABLE `service_tibs-button-kafka`.button_presses_from_kafka
+
+Query id: 6f5424fa-beef-42dc-aa40-0062327903ff
+
+   ┌─name─────────────┬─type────────────┬─default_type─┬─default_expression─┬─comment─┬─codec_expression─┬─ttl_expression─┐
+1. │ session_id       │ UUID            │              │                    │         │                  │                │
+2. │ timestamp        │ DateTime64(6)   │              │                    │         │                  │                │
+3. │ action           │ String          │              │                    │         │                  │                │
+4. │ country_name     │ String          │              │                    │         │                  │                │
+5. │ country_code     │ FixedString(2)  │              │                    │         │                  │                │
+6. │ subdivision_name │ String          │              │                    │         │                  │                │
+7. │ subdivision_code │ String          │              │                    │         │                  │                │
+8. │ city_name        │ String          │              │                    │         │                  │                │
+9. │ cohort           │ Nullable(Int16) │              │                    │         │                  │                │
+   └──────────────────┴─────────────────┴──────────────┴────────────────────┴─────────┴──────────────────┴────────────────┘
+
+9 rows in set. Elapsed: 0.001 sec.
+```
+
+And check if that's worked - ask the service table for its contents (which
+will "eat up the entries", but that's OK)
+
+[and remember to send some data with the data creator!]
+
+```
+tibs-button-ch-1 :) select * from `service_tibs-button-kafka`.button_presses_from_kafka
+
+SELECT *
+FROM `service_tibs-button-kafka`.button_presses_from_kafka
+
+Query id: 46337714-24e9-4a89-883c-4f88b58812ca
+
+   ┌─session_id───────────────────────────┬──────────────────timestamp─┬─action──────┬─country_name─┬─country_code─┬─subdivision_name─┬─subdivision_code─┬─city_name─┬─cohort─┐
+1. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:17.396751 │ PressButton │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+2. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:19.851751 │ PressButton │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+3. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:23.342751 │ PressButton │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+4. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:13.264751 │ EnterPage   │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+   └──────────────────────────────────────┴────────────────────────────┴─────────────┴──────────────┴──────────────┴──────────────────┴──────────────────┴───────────┴────────┘
+
+4 rows in set. Elapsed: 3.505 sec.
+```
+
+and yes, there it is.
+
+Note that:
+1. I believe the Karapace schema location is set up for us by the integration,
+   but I can double check that later on by deleting the ClickHouse service and
+   recreating everything.
+2. The timestamps are plausible, and are displayed in a friendly form, even
+   though stored as integers.
+
+So now to create the actual table we want - let's try
+```
+CREATE TABLE button_presses (
+    session_id UUID,
+    timestamp DateTime('UTC'),
+    action String,
+    country_name String,
+    country_code FixedString(2),
+    subdivision_name String,
+    subdivision_code String,
+    city_name String,
+    cohort Nullable(Smallint)
+)
+ENGINE = ReplicatedMergeTree
+ORDER BY timestamp
+```
+staying with an explicit UTC timestamp declaration
+
+and then join things up again
+```
+CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
+SELECT * FROM `service_tibs-button-kafka`.button_presses_from_kafka;
+```
+
+Send some more data, and then
+```
+tibs-button-ch-1 :) select * from button_presses
+
+SELECT *
+FROM button_presses
+
+Query id: 8ed97cff-7dae-4bbd-a979-373bd6cbb586
+
+    ┌─session_id───────────────────────────┬───────────timestamp─┬─action──────┬─country_name─┬─country_code─┬─subdivision_name─┬─subdivision_code─┬─city_name─┬─cohort─┐
+ 1. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:13 │ EnterPage   │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 2. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:17 │ PressButton │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 3. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:19 │ PressButton │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 4. │ 8b6f3882-7d99-4782-9731-82d411ec7ecf │ 2025-03-13 15:23:23 │ PressButton │ China        │ CN           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 5. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:39 │ EnterPage   │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 6. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:42 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 7. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:44 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 8. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:47 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+ 9. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:52 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+10. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:53 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+11. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:56 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+12. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:28:59 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+13. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:29:03 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+14. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:29:05 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+15. │ 53ab8d41-8744-4440-8096-51b4c3f417a2 │ 2025-03-13 15:29:10 │ PressButton │ France       │ FR           │                  │                  │           │   ᴺᵁᴸᴸ │
+    └──────────────────────────────────────┴─────────────────────┴─────────────┴──────────────┴──────────────┴──────────────────┴──────────────────┴───────────┴────────┘
+
+15 rows in set. Elapsed: 0.003 sec.
+```
+
+and there's some nice looking data (and hmm, that earlier data doesn't seem to
+have been lost).
+
+So, we have end-to-end data (and it's still going to PG as well)
+
+Next thing to do is to delete and recreate the ClickHouse service and
+associated things, just to make sure.
