@@ -8,22 +8,30 @@ Development notes are in the [working-document.md](working-document.md) file, an
 
 ## Overview
 
-This project is a demonstration application for the Aiven for Apache Kafka Workshop. It presents users with a button they're told not to push, then captures and streams interaction data to Kafka when they inevitably push it.
+This project is a demonstration application for the Aiven for Apache Kafka
+Workshop. It presents users with a button that claims to do nothing, then
+captures and streams interaction data to Kafka when they inevitably push it.
 
 ## Features
 
 - Interactive web interface with a tempting button
 - Geo-location tracking of user clicks
 - Real-time data streaming to Apache Kafka
+  - and from there into PostgreSQL and ClickHouse
 - HTMX for dynamic UI updates without page reloads
 - Random humorous responses when the button is clicked
 
 ## Prerequisites
 
 - Python 3.8+
-- An [Aiven for Apache Kafka](https://aiven.io/kafka) instance
-- SSL certificates for Kafka connection
-- Environment variables properly configured
+
+We'll explain how to set up the necessary services:
+
+- An [Aiven for Apache Kafka](https://aiven.io/kafka) service
+- Optionally, an [Aiven for PostgreSQL®](https://aiven.io/postgresql) service
+- Optionally, an [Aiven for ClickHouse®](https://aiven.io/clickhouse) service
+
+and how to use the button app, and/or generate fake data.
 
 ## Installation
 
@@ -42,60 +50,38 @@ This project is a demonstration application for the Aiven for Apache Kafka Works
    pip install -r requirements.txt
    ```
 
-3. Set up certificates:
-   Create a `certs` folder in the project root and place the following files there:
-
-   - `ca.pem`
-   - `service.cert`
-   - `service.key`
-
-4. Create a `.env` file with the following variables:
-
-   ```
-   AIVEN_KAFKA_SERVICE_ENDPOINT_URI=your-kafka-service-endpoint:9093
-   ```
-
-## Running the Application
-
-Start the FastAPI application:
-
-```
-uvicorn app.main:app --reload
-```
-
-The application will be available at <http://localhost:8000>
-
-> [!NOTE]
->
-> because this project is meant to use the public ip for users. Testing locally with your private IP is likely to cause errors.
+3. For the moment, follow the [summary.md](summary.md) document for the rest.
 
 ## Project Structure
 
 ```
-.
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   └── button_responses.py
-├── certs/
-│   ├── ca.pem
-│   ├── service.cert
-│   └── service.key
-├── static/
-├── templates/
-│   ├── index.html
-│   └── partials/
-│       └── button_text.html
-├── .env
-└── requirements.txt
+kafka-button-app/
+├─LICENSE
+├─README.md
+├─requirements.txt
+├─src/
+│ ├─__init__.py
+│ ├─app.py
+│ ├─button_responses.py
+│ ├─generate_data.py*
+│ └─message_support.py
+├─summary.md
+├─templates/
+│ ├─index.html
+│ └─partials/
+│   └─button_text.html
+└─working-document.md
 ```
 
 ## How It Works
 
-1. When a user visits the application, they are presented with a button they're told not to push.
+1. When a user visits the application, they are presented with a button
+   they're told does nothing.
 2. When they push the button, their IP address is captured and geo-located.
-3. The interaction data (timestamp, country, coordinates, session ID) is serialized and sent to Kafka.
-4. The UI is dynamically updated with a random humorous response.
+3. The interaction data (timestamp, country, coordinates, session ID) is
+   serialized and sent to Kafka. The IP address is not sent anywhere, as it
+   counts as personal data.
+4. The button is dynamically updated with a random humorous message.
 
 ## Kafka Integration
 
