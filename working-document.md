@@ -1913,3 +1913,146 @@ So, we have end-to-end data (and it's still going to PG as well)
 
 Next thing to do is to delete and recreate the ClickHouse service and
 associated things, just to make sure.
+
+So ... stop the integration with Kafka, and delete the service
+
+# Setting up ClickHouse from scratch
+
+Remember
+
+* We want to be in the same region as the Kafka service, `google-europe-west1`
+* We want to use an integration to connect Kafka to ClickHouse, and [Create a
+  ClickHouse sink connector for Aiven for Apache
+  Kafka®](https://aiven.io/docs/products/kafka/kafka-connect/howto/clickhouse-sink-connector)
+  points out that "Aiven for ClickHouse service integrations are available for
+  Startup plans and higher."
+* In that region, the smallest Startup plan is `startup-16`
+  ```
+  ; avn service plans --service-type clickhouse --cloud google-europe-west1
+  ClickHouse - Fast resource-effective data warehouse for analytical workloads Plans:
+
+      clickhouse:hobbyist            $0.233/h  Hobbyist (1 CPU, 4 GB RAM, 180 GB disk)
+      clickhouse:startup-16          $0.685/h  Startup-16 (2 CPU, 16 GB RAM, 1150 GB disk)
+      clickhouse:startup-32          $1.370/h  Startup-32 (4 CPU, 32 GB RAM, 2300 GB disk)
+      clickhouse:startup-64          $2.740/h  Startup-64 (8 CPU, 64 GB RAM, 4600 GB disk)
+      ...
+  ```
+
+```
+; avn service create $CH_SERVICE_NAME          \
+          --service-type clickhouse            \
+          --cloud google-europe-west1          \
+          --plan startup-16
+```
+
+```
+; avn service wait $CH_SERVICE_NAME
+```
+
+```
+avn service integration-create            \
+    --integration-type clickhouse_kafka   \
+    --source-service $KAFKA_SERVICE_NAME\
+    --dest-service $CH_SERVICE_NAME
+```
+
+```
+set -x KAFKA_CH_SERVICE_INTEGRATION_ID (avn service integration-list $CH_SERVICE_NAME --json | jq -r '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id')
+```
+
+`kafka-ch-integration-config.json` is
+```json
+{
+    "tables": [
+        {
+            "name": "button_presses_from_kafka",
+            "columns": [
+                {"name": "session_id", "type": "UUID"},
+                {"name": "timestamp", "type": "DateTime64(6)"},
+                {"name": "action", "type": "String"},
+                {"name": "country_name", "type": "String"},
+                {"name": "country_code", "type": "FixedString(2)"},
+                {"name": "subdivision_name", "type": "String"},
+                {"name": "subdivision_code", "type": "String"},
+                {"name": "city_name", "type": "String"},
+                {"name": "cohort", "type": "Nullable(Smallint)"}
+            ],
+            "topics": [{"name": "button_presses"}],
+            "data_format": "AvroConfluent",
+            "group_name": "button_presses_from_kafka_consumer"
+        }
+    ]
+}
+```
+
+```
+avn service integration-update \
+    $KAFKA_CH_SERVICE_INTEGRATION_ID \
+    --user-config-json @kafka-ch-integration-config.json
+```
+
+Generate some fake data.
+
+```
+./clickhouse client \
+    --host <HOST> --port <PORT> \
+    --user avnadmin --password <PASSWORD> \
+    --secure
+```
+
+and
+```
+select * from `service_tibs-button-kafka`.button_presses_from_kafka
+```
+
+and after a bit, there's my data!
+
+```
+CREATE TABLE button_presses (
+    session_id UUID,
+    timestamp DateTime('UTC'),
+    action String,
+    country_name String,
+    country_code FixedString(2),
+    subdivision_name String,
+    subdivision_code String,
+    city_name String,
+    cohort Nullable(Smallint)
+)
+ENGINE = ReplicatedMergeTree
+ORDER BY timestamp
+```
+
+```
+CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
+SELECT * FROM `service_tibs-button-kafka`.button_presses_from_kafka;
+```
+
+```
+select * from button_presses
+```
+
+which outputs
+```
+SELECT *
+FROM button_presses
+
+Query id: bc25838b-e3b4-413b-acd6-392622b62231
+
+    ┌─session_id───────────────────────────┬───────────timestamp─┬─action──────┬─country_name──┬─country_code─┬─subdivision_name─┬─subdivision_code─┬─city_name─┬─cohort─┐
+ 1. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:19 │ EnterPage   │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 2. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:23 │ PressButton │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 3. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:24 │ PressButton │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 4. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:25 │ PressButton │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 5. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:30 │ PressButton │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 6. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:31 │ PressButton │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 7. │ 0fa48496-efe3-454b-a1de-99dfdfc49196 │ 2025-03-13 15:48:34 │ PressButton │ United States │ US           │ Massachusetts    │ MA               │ Cambridge │   ᴺᵁᴸᴸ │
+ 8. │ 6a928093-ee61-4d0d-90be-9ab1fc99da4f │ 2025-03-13 15:50:55 │ EnterPage   │ United States │ US           │ Iowa             │ IA               │ Akron     │   ᴺᵁᴸᴸ │
+ 9. │ 6a928093-ee61-4d0d-90be-9ab1fc99da4f │ 2025-03-13 15:50:58 │ PressButton │ United States │ US           │ Iowa             │ IA               │ Akron     │   ᴺᵁᴸᴸ │
+10. │ 6a928093-ee61-4d0d-90be-9ab1fc99da4f │ 2025-03-13 15:51:01 │ PressButton │ United States │ US           │ Iowa             │ IA               │ Akron     │   ᴺᵁᴸᴸ │
+    └──────────────────────────────────────┴─────────────────────┴─────────────┴───────────────┴──────────────┴──────────────────┴──────────────────┴───────────┴────────┘
+
+10 rows in set. Elapsed: 0.002 sec.
+```
+
+So all seems good.
