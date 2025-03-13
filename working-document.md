@@ -871,3 +871,767 @@ Lots of stuff is logged, so you can tell what is going on.
 
 To send fake data, you can still run `src/generate_data.py` (it will give help
 if you pass `--help`). It and the app use the same code to create the messsages.
+
+# Connecting to ClickHouse
+
+Ideally we use the same JDBC / Avro connector as for PG, so the data stream is
+common.
+
+Relevant Aiven docs:
+
+* The generic [Create a JDBC sink connector from Apache Kafka® to another
+  database](https://aiven.io/docs/products/kafka/kafka-connect/howto/jdbc-sink)
+* But lo [Create a ClickHouse sink connector for Aiven for Apache
+  Kafka®](https://aiven.io/docs/products/kafka/kafka-connect/howto/clickhouse-sink-connector)
+  uses an integration
+* And actually [Connect Apache Kafka® to Aiven for
+  ClickHouse®](https://aiven.io/docs/products/clickhouse/howto/integrate-kafka)
+  and
+  [https://aiven.io/docs/products/clickhouse/reference/supported-input-output-formats](https://aiven.io/docs/products/clickhouse/reference/supported-input-output-formats)
+ 
+  And two of the supported formats are
+ 
+  * Avro: Binary Avro format with embedded schema, as per
+    https://avro.apache.org/ - this presumably has the "bigger message"
+    problem we wanted to avoid with JSON messages needing to carry a JSON
+    schema (although, packed more efficiently)
+  * AvroConfluent: Binary Avro with schema registry. Requires the Karapace
+    Schema Registry to be enabled in the Kafka service. Which sounds just like
+    what we want.
+
+The article [Connecting Apache Kafka® and Aiven for
+ClickHouse®](https://aiven.io/developer/connecting-kafka-and-clickhouse) also
+looks like it will be useful, and when we want to encapsulate the system in
+terraform, [Aiven for Apache Kafka® as a source for Aiven for
+ClickHouse®](https://aiven.io/developer/kafka-source-for-clickhouse) will
+likely be useful.
+
+## Create our ClickHouse service
+
+```
+set -x CH_SERVICE_NAME tibs-button-ch
+```
+
+We want the same region as the Kafka service.
+
+What plan? According to [Aiven Plans and Pricing
+(ClickHouse)](https://aiven.io/pricing?product=clickhouse&tab=plan-pricing), a
+hobbyist plan gives 180GB total storage, and a startup plan gives 1150-4600GB.
+For the purposes of this demo, a hobbyist plan would be quite sufficient.
+*However* we would like to use an integration to connect Kafka to ClickHouse, and
+[Create a ClickHouse sink connector for Aiven for Apache
+Kafka®](https://aiven.io/docs/products/kafka/kafka-connect/howto/clickhouse-sink-connector)
+points out that "Aiven for ClickHouse service integrations are available for
+Startup plans and higher."
+
+In the region we want, the smallest startup plan at the moment is `startup-16`
+```
+; avn service plans --service-type clickhouse --cloud google-europe-west1
+ClickHouse - Fast resource-effective data warehouse for analytical workloads Plans:
+
+    clickhouse:hobbyist            $0.233/h  Hobbyist (1 CPU, 4 GB RAM, 180 GB disk)
+    clickhouse:startup-16          $0.685/h  Startup-16 (2 CPU, 16 GB RAM, 1150 GB disk)
+    clickhouse:startup-32          $1.370/h  Startup-32 (4 CPU, 32 GB RAM, 2300 GB disk)
+    clickhouse:startup-64          $2.740/h  Startup-64 (8 CPU, 64 GB RAM, 4600 GB disk)
+    ...
+```
+
+So let's do it
+```
+; avn service create $CH_SERVICE_NAME          \
+          --service-type clickhouse            \
+          --cloud google-europe-west1          \
+          --plan startup-16
+```
+
+And we can do the normal
+```
+; avn service wait $CH_SERVICE_NAME
+```
+
+Once that's running, we're going to follow
+[Connecting Apache Kafka® and Aiven for
+ClickHouse®](https://aiven.io/developer/connecting-kafka-and-clickhouse)
+
+First create the integration
+```
+avn service integration-create            \
+    --integration-type clickhouse_kafka   \
+    --source-service $KAFKA_SERVICE_NAME\
+    --dest-service $CH_SERVICE_NAME
+```
+
+To check that worked we do:
+```
+; avn service integration-list $CH_SERVICE_NAME | grep $KAFKA_SERVICE_NAME
+
+
+(integration not enabled)             tibs-button-ch     tibs-button-kafka  kafka_logs              false    false   Send service logs to an Apache Kafka service or an external Apache Kafka cluster
+ce2f14fb-68c1-46ee-8be2-181b4acf515b  tibs-button-kafka  tibs-button-ch     clickhouse_kafka        true     true    Send and receive data between ClickHouse and Apache Kafka services
+```
+
+which shows we've got a Kafka to ClickHouse integration running (bit not the
+other way round)
+
+Without the `grep` we get another row, and column headings:
+```
+; avn service integration-list $CH_SERVICE_NAME
+SERVICE_INTEGRATION_ID                SOURCE             DEST               INTEGRATION_TYPE        ENABLED  ACTIVE  DESCRIPTION
+====================================  =================  =================  ======================  =======  ======  ================================================================================
+(integration not enabled)             tibs-button-ch     tibs-button-ch     clickhouse_credentials  false    false   Add remote data source credentials to be used in ClickHouse service
+(integration not enabled)             tibs-button-ch     tibs-button-kafka  kafka_logs              false    false   Send service logs to an Apache Kafka service or an external Apache Kafka cluster
+ce2f14fb-68c1-46ee-8be2-181b4acf515b  tibs-button-kafka  tibs-button-ch     clickhouse_kafka        true     true    Send and receive data between ClickHouse and Apache Kafka services
+```
+
+We're going to need that service integration id, so let's leverage the
+`--json` output available with `avn` commands. After playing around with `jq`
+a bit, I can use
+```
+; avn service integration-list $CH_SERVICE_NAME --json | jq '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id'
+"ce2f14fb-68c1-46ee-8be2-181b4acf515b"
+```
+But I don't want the double quotes round the value, so I need to give the `-r` (`--raw-output`)
+switch to `jq`
+```
+; avn service integration-list $CH_SERVICE_NAME --json | jq -r '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id'
+ce2f14fb-68c1-46ee-8be2-181b4acf515b
+```
+and thus save it as
+```
+set -x KAFKA_CH_SERVICE_INTEGRATION_ID (avn service integration-list $CH_SERVICE_NAME --json | jq -r '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id')
+```
+
+and to check
+```
+; echo $KAFKA_CH_SERVICE_INTEGRATION_ID
+"ce2f14fb-68c1-46ee-8be2-181b4acf515b"
+```
+
+Given that, we can say what we want the integration to do. The example uses
+in-line JSON on the command line, but we're going to create a file called
+`kafka-ch-integration-config.json` for convenience. It should look like
+```json
+{
+    "tables": [
+        {
+            "name": "button_presses_from_kafka",
+            "columns": [
+                {"name": "session_id", "type": "UUID"},
+                {"name": "timestamp", "type": "DateTime"},
+                {"name": "action", "type": "String"},
+                {"name": "country_name", "type": "String"},
+                {"name": "country_code", "type": "FixedString(2)"},
+                {"name": "subdivision_name", "type": "String"},
+                {"name": "subdivision_code", "type": "String"},
+                {"name": "city_name", "type": "String"},
+                {"name": "cohort", "type": "Nullable(Smallint)"}
+            ],
+            "topics": [{"name": "button_presses"}],
+            "data_format": "AvroConfluent",
+            "group_name": "button_presses_from_kafka_consumer"
+        }
+    ]
+}
+```
+
+In the above:
+
+* We describe the Kafka messages in the `button_presses_from_kafka` section.
+  ClickHouse will write data into an intermediate service table (check the
+  terminology) with this name.
+* We know the data is in `AvroConfluent` form
+* The topic is `button_presses`
+
+We then set the integration configuration
+```
+avn service integration-update \
+    $KAFKA_CH_SERVICE_INTEGRATION_ID \
+    --user-config-json @kafka-ch-integration-config.json
+```
+
+To see what ClickHouse is doing, I want the ClickHouse CLI.
+See [ClickHouse Client](https://clickhouse.com/docs/interfaces/cli) for
+options on install it.
+
+There *is* a homebrew option (`brew install --cask clickhouse`), but it's not
+mentioned on the ClickHouse web site, so I do what *that* advises
+```
+; curl https://clickhouse.com/ | sh
+```
+
+which puts the `clickhouse` binary in my current directory. Which is good
+enough for now (and also installs a more up-to-date version of the command -
+25.3.1.1803 versus 25.2.1.3085-stable).
+
+To get the information needed to connect to our ClickHouse service:
+```
+; avn service get $CH_SERVICE_NAME --json | jq .service_uri_params
+```
+
+and then
+```
+./clickhouse client \
+    --host <HOST> --port <PORT> \
+    --user avnadmin --password <PASSWORD> \
+    --secure
+```
+
+and once in
+```
+tibs-button-ch-1 :) show databases
+
+SHOW DATABASES
+
+Query id: c88dd48a-fbd6-4fda-9ced-4a3807033f6c
+
+   ┌─name──────────────────────┐
+1. │ INFORMATION_SCHEMA        │
+2. │ default                   │
+3. │ information_schema        │
+4. │ service_tibs-button-kafka │
+5. │ system                    │
+   └───────────────────────────┘
+
+5 rows in set. Elapsed: 0.001 sec.
+```
+
+```
+tibs-button-ch-1 :) show tables from `service_tibs-button-kafka`
+
+SHOW TABLES FROM `service_tibs-button-kafka`
+
+Query id: 2d17d7f0-063c-4c0e-b5b9-eb9a921dcd56
+
+   ┌─name──────────────────────┐
+1. │ button_presses_from_kafka │
+   └───────────────────────────┘
+
+1 row in set. Elapsed: 0.002 sec.
+```
+
+```
+tibs-button-ch-1 :) describe `service_tibs-button-kafka`.button_presses_from_kafka
+
+DESCRIBE TABLE `service_tibs-button-kafka`.button_presses_from_kafka
+
+Query id: a11d173b-add0-44bc-87d7-9669ee65bcf5
+
+   ┌─name─────────────┬─type────────────┬─default_type─┬─default_expression─┬─comment─┬─codec_expression─┬─ttl_expression─┐
+1. │ session_id       │ UUID            │              │                    │         │                  │                │
+2. │ timestamp        │ DateTime        │              │                    │         │                  │                │
+3. │ action           │ String          │              │                    │         │                  │                │
+4. │ country_name     │ String          │              │                    │         │                  │                │
+5. │ country_code     │ FixedString(2)  │              │                    │         │                  │                │
+6. │ subdivision_name │ String          │              │                    │         │                  │                │
+7. │ subdivision_code │ String          │              │                    │         │                  │                │
+8. │ city_name        │ String          │              │                    │         │                  │                │
+9. │ cohort           │ Nullable(Int16) │              │                    │         │                  │                │
+   └──────────────────┴─────────────────┴──────────────┴────────────────────┴─────────┴──────────────────┴────────────────┘
+
+9 rows in set. Elapsed: 0.001 sec.
+```
+
+We *can* look at the messages in this table, but that will "eat" them.
+
+Following the tutorial, we need to create somewhere for the data to go -
+section [Persist Kafka messages in Clickhouse
+table](https://aiven.io/developer/connecting-kafka-and-clickhouse#persist-kafka-messages-in-clickhouse-table)
+
+We need a destination table, where the data will get stored permanently, and a
+materialised view, to act as the bridge from the service table to that
+destination table.
+
+```
+CREATE TABLE button_presses (
+                session_id UUID,
+                timestamp DateTime,
+                action String,
+                country_name String,
+                country_code FixedString(2),
+                subdivision_name String,
+                subdivision_code String,
+                city_name String,
+                cohort Nullable(Smallint)
+
+)
+ENGINE = ReplicatedMergeTree()
+ORDER BY timestamp
+```
+
+which looks like:
+```
+tibs-button-ch-1 :) CREATE TABLE button_presses (
+                session_id UUID,
+                timestamp DateTime,
+                action String,
+                country_name String,
+                country_code FixedString(2),
+                subdivision_name String,
+                subdivision_code String,
+                city_name String,
+                cohort Nullable(Smallint)
+
+)
+ENGINE = ReplicatedMergeTree()
+ORDER BY timestamp
+
+
+CREATE TABLE button_presses
+(
+    `session_id` UUID,
+    `timestamp` DateTime,
+    `action` String,
+    `country_name` String,
+    `country_code` FixedString(2),
+    `subdivision_name` String,
+    `subdivision_code` String,
+    `city_name` String,
+    `cohort` Nullable(Smallint)
+)
+ENGINE = ReplicatedMergeTree
+ORDER BY timestamp
+
+Query id: 25e4561b-338d-43ab-8038-936629ba32b6
+
+   ┌─shard───┬─replica──────────────────────────────────┬─status─┬─num_hosts_remaining─┬─num_hosts_active─┐
+1. │ s_4c27c │ tibs-button-ch-1.devrel-tibs.aiven.local │ OK     │                   0 │                0 │
+   └─────────┴──────────────────────────────────────────┴────────┴─────────────────────┴──────────────────┘
+
+1 row in set. Elapsed: 0.047 sec.
+```
+
+and then
+```
+CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
+SELECT * FROM `service_tibs-button-kafka`.button_presses_from_kafka;
+```
+
+which looks like
+```
+tibs-button-ch-1 :) CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
+SELECT * FROM `service_tibs-button-kafka`.button_presses_from_kafka;
+
+
+CREATE MATERIALIZED VIEW materialised_view TO button_presses
+AS SELECT *
+FROM `service_tibs-button-kafka`.button_presses_from_kafka
+
+Query id: fadbec2c-af73-44c6-88df-573b8ec77e8f
+
+   ┌─shard───┬─replica──────────────────────────────────┬─status─┬─num_hosts_remaining─┬─num_hosts_active─┐
+1. │ s_4c27c │ tibs-button-ch-1.devrel-tibs.aiven.local │ OK     │                   0 │                0 │
+   └─────────┴──────────────────────────────────────────┴────────┴─────────────────────┴──────────────────┘
+
+1 row in set. Elapsed: 0.013 sec.
+```
+
+Unfortunately, data doesn't seem to be coming through.
+
+
+The missing piece may be telling ClickHouse about the schema repository
+(unsurprisingly). It looks as if the ClickHouse page
+[AvroConfluent](https://clickhouse.com/docs/interfaces/formats/AvroConfluent)
+may be my friend...
+
+For debugging purposes, try the following at the ClickHouse SQL prompt:
+
+```
+SET format_avro_schema_registry_url = 'https://avnadmin:<password>@tibs-button-kafka-devrel-tibs.l.aivencloud.com:10148'
+```
+
+and send some more data...
+
+...but still no joy
+
+Let's check the support datatypes for AvroConfluent, as documented at
+[AvroConfluent](https://clickhouse.com/docs/interfaces/formats/AvroConfluent)
+
+The two problems may be the `string` -> `UUID`, and the `string` -> `datetime`
+
+[`data_time_input_format`](https://clickhouse.com/docs/operations/settings/formats#date_time_input_format)
+says that the "Cloud default value" is `best_effort`, which should understand
+the ISO 8601 strings I'm sending.
+
+**But**
+```
+tibs-button-ch-1 :) select name, value from system.settings where name = 'date_time_input_format'
+
+SELECT
+    name,
+    value
+FROM system.settings
+WHERE name = 'date_time_input_format'
+
+Query id: 3d7db67e-57ce-4725-a3a1-e3dcac768d3d
+
+   ┌─name───────────────────┬─value─┐
+1. │ date_time_input_format │ basic │
+   └────────────────────────┴───────┘
+
+1 row in set. Elapsed: 0.003 sec. Processed 1.09 thousand rows, 241.21 KB (392.62 thousand rows/s., 86.49 MB/s.)
+Peak memory usage: 0.00 B.
+```
+and `basic` doesn't understand the `T` in the string or the timezone
+information.
+
+```
+tibs-button-ch-1 :) set date_time_input_format = 'best_effort'
+
+SET date_time_input_format = 'best_effort'
+
+Query id: 0a90e346-a51b-403e-a746-faca7c69de41
+
+Ok.
+
+0 rows in set. Elapsed: 0.049 sec.
+```
+
+Hmm. Looking at the logs (in the console) it is saying
+```
+[tibs-button-ch-1]2025-03-12T15:48:32.797461[clickhouse]2025.03.12 15:48:32.797379 [ 708 ] {} <Error> StorageKafka (button_presses_from_kafka): void DB::StorageKafka::threadFunc(size_t) Code: 44. DB::Exception: Type DateTime is not compatible with Avro string:
+```
+
+so maybe I should give up and use an integer timestamp in my Avro messages.
+
+> Meanwhile, let's stop the service integration:
+>
+> `; avn service integration-delete  $KAFKA_CH_SERVICE_INTEGRATION_ID`
+
+According to the AvroConfluent docs, `long (timestamp-millis)` and `long
+(timestamp-micros)` *will* convert to a `DateTime64`.
+
+Ah! There's a section I'd missed in the [Avro
+spec](https://avro.apache.org/docs/1.11.1/specification/) (as an excuse, it is
+at the end) on **Logical Types**, including
+* `uuid` - this annotates a string
+* `timestamp-millis` - this annotates a long
+* `timestamp-micros` - this annotates a long
+
+For instance:
+```json
+{ "type": "string", "logicalType": "uuid" }
+```
+
+So my Avro schema would ideally be 
+
+## Avro schema refinement
+
+The old Avro schema looked like (I'm just showing the column definitions, not
+the whole thing, and this is actually Python code, since that's where we
+definte the schema - run with it :))
+```
+[
+    {'name': 'session_id', 'type': 'string'},
+    {'name': 'timestamp', 'type': 'string'},
+    {'name': 'action', 'type': 'string'},
+    {'name': 'country_name', 'type': 'string'},
+    {'name': 'country_code', 'type': 'string'},
+    {'name': 'subdivision_name', 'type': 'string'},
+    {'name': 'subdivision_code', 'type': 'string'},
+    {'name': 'city_name', 'type': 'string'},
+    {'name': 'cohort', 'type': ['null', 'int'], 'default': 'null'},
+]
+```
+
+It *sounds* as if we actually want
+```
+[
+    {'name': 'session_id', 'type': 'string', 'logicalType': 'uuid'},
+    {'name': 'timestamp', 'type': 'long', 'logicalType': 'timestamp_micros},
+    {'name': 'action', 'type': 'string'},
+    {'name': 'country_name', 'type': 'string'},
+    {'name': 'country_code', 'type': 'string'},
+    {'name': 'subdivision_name', 'type': 'string'},
+    {'name': 'subdivision_code', 'type': 'string'},
+    {'name': 'city_name', 'type': 'string'},
+]
+```
+
+That doesn't require a change in the Python code for the `session_id` (it's
+still a string), but it *does* mean a change for the `timestamp`.
+
+What resolution should we use?
+
+Python's `datetime.datetime.now().timestamp()` gives a floating point value
+representing seconds, but the resolution appears to be microseconds, so one
+can do
+```
+now_utc = datetime.datetime.now(datetime.timezone.utc)
+microseconds_since_epoch = int(now_utc.timestamp() * 1000_000)
+```
+
+The Postgres documentation confirms that its `timestamp with time zone`
+resolves to the microsecond, but ([Time
+Stamps](https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-INPUT-TIME-STAMPS))
+it looks as if it will only take a string as input. So it *may* be
+best/simplest just to use a `bigint` (an 8 byte integer)
+
+What about the datatypes supported by the JDBC connector? The tables in the
+Aiven Open [kafka Connect JDBC Sink
+Connector](https://github.com/Aiven-Open/jdbc-connector-for-apache-kafka/blob/master/docs/sink-connector.md)
+docs appear to suggest that "Connect schema type" `Timestamp` converts to PG
+`TIMESTAMP`
+
+Hmm. In my PG table, `timestamp` was a `character(32)`.
+
+Let's change to a `timestamptz` (the lazy way):
+
+```
+defaultdb=> alter table button_presses drop column timestamp;
+defaultdb=> alter table button_presses add column timestamp timestamptz;
+```
+and it's now a `timestamp with time zone`.
+
+And as expected, the conncetor logs an error:
+```
+ERROR: column "timestamp" is of type timestamp with time zone but expression is of type bigint
+  Hint: You will need to rewrite or cast the expression.
+```
+
+which I might be able to fix by Postgres magic, but it's simpler just to use a bigint...
+
+So, let's do that
+```
+defaultdb=> alter table button_presses drop column timestamp;
+defaultdb=> alter table button_presses add column timestamp bigint;
+```
+
+and delete / create the connector, and send data again ... and now I can see
+the integer timestamps. So let's live with that, at least for now.
+
+Let's restart the ClickHouse integration
+
+```
+; avn service integration-create            \
+          --integration-type clickhouse_kafka   \
+          --source-service $KAFKA_SERVICE_NAME\
+      --dest-service $CH_SERVICE_NAME
+```
+
+```
+set -x KAFKA_CH_SERVICE_INTEGRATION_ID (avn service integration-list $CH_SERVICE_NAME --json | jq -r '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id')
+```
+
+```
+avn service integration-update \
+    $KAFKA_CH_SERVICE_INTEGRATION_ID \
+    --user-config-json @kafka-ch-integration-config.json
+```
+
+Back in ClickHouse:
+
+1. Still getting errors in the log
+2. I've realised I should have made the column datatype `DateTime('UTC')`
+
+Fixing that second, first:
+```json
+  1 {
+  2     "tables": [
+  3         {
+  4             "name": "button_presses_from_kafka",
+  5             "columns": [
+  6                 {"name": "session_id", "type": "UUID"},
+  7                 {"name": "timestamp", "type": "DateTime('UTC')"},
+  8                 {"name": "action", "type": "String"},
+  9                 {"name": "country_name", "type": "String"},
+ 10                 {"name": "country_code", "type": "FixedString(2)"},
+ 11                 {"name": "subdivision_name", "type": "String"},
+ 12                 {"name": "subdivision_code", "type": "String"},
+ 13                 {"name": "city_name", "type": "String"},
+ 14                 {"name": "cohort", "type": "Nullable(Smallint)"}
+ 15             ],
+ 16             "topics": [{"name": "button_presses"}],
+ 17             "data_format": "AvroConfluent",
+ 18             "group_name": "button_presses_from_kafka_consumer"
+ 19         }
+ 20     ]
+ 21 }
+```
+
+and update the integration
+```
+; avn service integration-update \
+          $KAFKA_CH_SERVICE_INTEGRATION_ID \
+          --user-config-json @kafka-ch-integration-config.json
+```
+
+After that,
+```
+describe `service_tibs-button-kafka`.button_presses_from_kafka
+```
+shows the `timestamp` column as being `DateTime('UTC')`
+
+```
+tibs-button-ch-1 :) drop table materialised_view
+DROP TABLE button_presses
+```
+
+and try recreating them
+```
+CREATE TABLE button_presses (
+    session_id UUID,
+    timestamp DateTime('UTC'),
+    action String,
+    country_name String,
+    country_code FixedString(2),
+    subdivision_name String,
+    subdivision_code String,
+    city_name String,
+    cohort Nullable(Smallint)
+)
+ENGINE = ReplicatedMergeTree
+ORDER BY timestamp
+```
+
+```
+CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
+SELECT * FROM `service_tibs-button-kafka`.button_presses_from_kafka;
+
+```
+
+Hmm. I'm still getting
+```
+[tibs-button-ch-1]2025-03-12T18:41:23.147343[clickhouse]2025.03.12 18:41:23.147269 [ 681 ] {} <Error> StorageKafka (button_presses_from_kafka): void DB::StorageKafka::threadFunc(size_t) Code: 44. DB::Exception: Type DateTime('UTC') is not compatible with Avro string:
+```
+in the logs.
+
+
+??? Is it old messages ???
+
+Let's delete and recreate the topic
+
+1. Disconnect from CH
+2. Delete the connector
+
+(I used the console for convenience)
+
+
+```
+; avn service topic-delete $KAFKA_SERVICE_NAME $KAFKA_BUTTON_TOPIC
+```
+
+```
+; avn service topic-create      \
+      --partitions 3            \
+      --replication 2           \
+      --remote-storage-enable   \
+      --local-retention-ms 5000 \
+      $KAFKA_SERVICE_NAME $KAFKA_BUTTON_TOPIC
+```
+
+and restart/reconnect things
+
+```
+; avn service connector create $KAFKA_SERVICE_NAME @pg_avro_sink.json
+```
+
+```
+; avn service integration-create            \
+          --integration-type clickhouse_kafka   \
+          --source-service $KAFKA_SERVICE_NAME\
+      --dest-service $CH_SERVICE_NAME
+```
+
+```
+set -x KAFKA_CH_SERVICE_INTEGRATION_ID (avn service integration-list $CH_SERVICE_NAME --json | jq -r '. | map(select(.integration_type == "clickhouse_kafka"))[0].service_integration_id')
+```
+
+```
+avn service integration-update \
+    $KAFKA_CH_SERVICE_INTEGRATION_ID \
+    --user-config-json @kafka-ch-integration-config.json
+```
+
+and generate some new data.
+
+Which shows up in PG.
+
+And now in the CH logs I have
+```
+[tibs-button-ch-1]2025-03-12T19:00:24.366561[clickhouse]2025.03.12 19:00:24.366488 [ 723 ] {} <Error> StorageKafka (button_presses_from_kafka): void DB::StorageKafka::threadFunc(size_t) Code: 117. DB::Exception: Unexpected type for default value: Expected null, but found string in line 1: while fetching schema id = 6: (at row 1)
+```
+
+Schema id `6` matches what the data generator said it used.
+
+Let's look:
+
+```
+; curl -X GET https://avnadmin:<password>@tibs-button-kafka-devrel-tibs.l.aivencloud.com:10148/schemas/ids/6
+{"schema":"{\"doc\":\"Web app interactions\",\"fields\":[{\"logicalType\":\"uuid\",\"name\":\"session_id\",\"type\":\"string\"},{\"logicalType\":\"timestamp-millis\",\"name\":\"timestamp\",\"type\":\"long\"},{\"name\":\"action\",\"type\":\"string\"},{\"name\":\"country_name\",\"type\":\"string\"},{\"name\":\"country_code\",\"type\":\"string\"},{\"name\":\"subdivision_name\",\"type\":\"string\"},{\"name\":\"subdivision_code\",\"type\":\"string\"},{\"name\":\"city_name\",\"type\":\"string\"},{\"default\":\"null\",\"name\":\"cohort\",\"type\":[\"null\",\"int\"]}],\"name\":\"button_presses\",\"type\":\"record\"}"}⏎
+```
+
+or using `jq` (twice!)
+
+```
+; curl -X GET https://avnadmin:<password>@tibs-button-kafka-devrel-tibs.l.aivencloud.com:10148/schemas/ids/6 | jq -r .schema | jq
+{
+  "doc": "Web app interactions",
+  "fields": [
+    {
+      "logicalType": "uuid",
+      "name": "session_id",
+      "type": "string"
+    },
+    {
+      "logicalType": "timestamp-millis",
+      "name": "timestamp",
+      "type": "long"
+    },
+    {
+      "name": "action",
+      "type": "string"
+    },
+    {
+      "name": "country_name",
+      "type": "string"
+    },
+    {
+      "name": "country_code",
+      "type": "string"
+    },
+    {
+      "name": "subdivision_name",
+      "type": "string"
+    },
+    {
+      "name": "subdivision_code",
+      "type": "string"
+    },
+    {
+      "name": "city_name",
+      "type": "string"
+    },
+    {
+      "default": "null",
+      "name": "cohort",
+      "type": [
+        "null",
+        "int"
+      ]
+    }
+  ],
+  "name": "button_presses",
+  "type": "record"
+}
+```
+
+-----
+
+Next day, looking at it afresh...
+
+* error message `Unexpected type for default value: Expected null, but found string`
+* line in Avro schema definition
+  ```python
+  {'name': 'cohort', 'type': ['null', 'int'], 'default': 'null'},
+  ```
+* but that's a Python code, so it should be
+  ```python
+  {'name': 'cohort', 'type': ['null', 'int'], 'default': None},
+  ```
+  
+Changing that causes the schema id to go up to 7 (good) when I send fake data.
+
+I'm still getting errors about schema id 6 in the ClickHouse log, presumably
+because it's trying to read old messages.
+
+Let's "restart" the topic again (as we did earlier)

@@ -91,9 +91,11 @@ class FakeEventCreator:
         """Move time fowards and return an Event
         """
         self.now = self.now + datetime.timedelta(milliseconds=elapsed_ms)
+        microseconds_since_epoch = int(self.now.timestamp() * 1000_000)
+
         return Event(
             **dict(self.cookie),
-            timestamp=self.now.isoformat(),
+            timestamp=microseconds_since_epoch,
             action = str(action),
         )
 

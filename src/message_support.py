@@ -120,7 +120,7 @@ def new_cookie(
 
 class Event(BaseModel):
     session_id: str
-    timestamp: str
+    timestamp: int
     cohort: int | None
     action: str
     country_name: str
@@ -138,15 +138,15 @@ def create_avro_schema(topic_name: str=DEFAULT_TOPIC_NAME) -> str:
         'name': topic_name,
         'type': 'record',
         'fields': [
-            {'name': 'session_id', 'type': 'string'},
-            {'name': 'timestamp', 'type': 'string'},
+            {'name': 'session_id', 'type': 'string', 'logicalType': 'uuid'},
+            {'name': 'timestamp', 'type': 'long', 'logicalType': 'timestamp-millis'},
             {'name': 'action', 'type': 'string'},
             {'name': 'country_name', 'type': 'string'},
             {'name': 'country_code', 'type': 'string'},
             {'name': 'subdivision_name', 'type': 'string'},
             {'name': 'subdivision_code', 'type': 'string'},
             {'name': 'city_name', 'type': 'string'},
-            {'name': 'cohort', 'type': ['null', 'int'], 'default': 'null'},
+            {'name': 'cohort', 'type': ['null', 'int'], 'default': None},
         ],
     }
     return json.dumps(schema)
@@ -164,6 +164,14 @@ def register_avro_schema(schema_uri: str, schema_as_str: str, topic_name: str) -
     Returns the schema id, which gets embedded into the messages.
     """
 
+    if False:
+        logging.info(f'Deleting all versions of schema {topic_name}-value')
+        r = httpx.delete(
+            f'{schema_uri}/subjects/{topic_name}-value',
+        )
+        r.raise_for_status()
+        logging.info(f'Deleting schema, response is {r} {r.text=} {r.json()=}')
+
     logging.info(f'Registering schema {topic_name}-value')
     r = httpx.post(
         f'{schema_uri}/subjects/{topic_name}-value/versions',
@@ -171,7 +179,7 @@ def register_avro_schema(schema_uri: str, schema_as_str: str, topic_name: str) -
     )
     r.raise_for_status()
 
-    logging.info(f'Registered schema {r} {r.text=} {r.json()=}')
+    logging.info(f'Registered schema, response is {r} {r.text=} {r.json()=}')
     response_json = r.json()
     return response_json['id']
 

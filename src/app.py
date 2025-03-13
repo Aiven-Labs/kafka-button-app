@@ -156,9 +156,12 @@ def get_ip_address(request: Request) -> str:
 async def send_avro_message(cookie: Cookie, action: Action):
     """Send an Avro encoded message based on the cookie."""
 
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    microseconds_since_epoch = int(now_utc.timestamp() * 1000_000)
+
     event = Event(
         **dict(cookie),
-        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        timestamp=microseconds_since_epoch,
         action=action,
     )
     logging.info(f'Sending Avro message {event}')
