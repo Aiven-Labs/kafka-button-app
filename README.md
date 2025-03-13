@@ -1,6 +1,6 @@
 # Pushing this button does nothing (really)
 
-A fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka.
+A fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka, and from there to PostgreSQL and/or ClickHouse.
 
 If you want to play along, instructions are in [summary.md](summary.md). The intent is to fold them into this README at a later stage.
 
