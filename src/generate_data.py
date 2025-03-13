@@ -74,7 +74,7 @@ class FakeEventCreator:
         """
         self.geoip = geoip
         self.now = datetime.datetime.now(datetime.timezone.utc)
-        self.cookie = new_cookie(geoip, self.get_fake_ip_address, cohort)
+        self.cookie = new_cookie(geoip, self.get_fake_ip_address, cohort=cohort)
         logging.info(f'New "session" {self.cookie}')
 
     def get_fake_ip_address(self, request: Any) -> str:
