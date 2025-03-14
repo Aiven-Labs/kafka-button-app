@@ -129,6 +129,24 @@ class Event(BaseModel):
     subdivision_code: str    # may be ''
     city_name: str           # may be ''
 
+    def to_str(self, this_session_id: str) -> str:
+        parts = []
+        parts.append(f'{self.action:11} {self.session_id}{" (this session)" if this_session_id == self.session_id else ""}')
+        timestamp_seconds = float(self.timestamp) / 1_000_000
+        timestamp = datetime.datetime.fromtimestamp(timestamp_seconds, datetime.timezone.utc)
+        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')
+        parts.append(f'{timestamp_str}')
+        parts.append(f'[{self.cohort}]')
+        if self.country_code:
+            parts.append(f'{self.country_name} ({self.country_code})')
+        else:
+            parts.append(f'{self.country_name}')
+        if self.subdivision_name:
+            parts.append(f'{self.subdivision_name} {(self.subdivision_code)}')
+        if self.city_name:
+            parts.append(self.city_name)
+        return ' '.join(parts)
+
 
 def create_avro_schema(topic_name: str=DEFAULT_TOPIC_NAME) -> str:
     """When we *use* the Avro schema, we need it as a string.
@@ -158,7 +176,7 @@ def get_parsed_avro_schema(schema_as_str: str) -> avro.schema.RecordSchema:
     return avro.schema.parse(schema_as_str)
 
 
-def register_avro_schema(schema_uri: str, schema_as_str: str, topic_name: str) -> int:
+def register_avro_schema(schema_uri: str, topic_name: str, schema_as_str: str) -> int:
     """Register our schema with Karapace.
 
     Returns the schema id, which gets embedded into the messages.
@@ -182,6 +200,10 @@ def register_avro_schema(schema_uri: str, schema_as_str: str, topic_name: str) -
     logging.info(f'Registered schema, response is {r} {r.text=} {r.json()=}')
     response_json = r.json()
     return response_json['id']
+
+
+def lookup_avro_schema(schema_uri: str, topic_name: str, schema_id: int) -> str:
+    """Look up the schema in Karapace"""
 
 
 def make_avro_payload(
@@ -223,3 +245,50 @@ def make_avro_payload(
     raw_bytes = byte_data.getvalue()
 
     return raw_bytes
+
+async def unpack_avro_payload(
+        message: bytes,
+        schema_uri: str,
+        cached_schema: dict[int: str],
+) -> Event:
+    """Given an Avro message, look up the schema and unpack it.
+
+    * `message` is the Avro messge, which is the schema information
+      followed by the actual message.
+    * `schema_uri` is where to find the Karapace server.
+    * `cached_schema` is a very simple cache of known schemas, by
+      their id. In actual fact, we expect to be using the schema
+      that the application used to *create* messages, so our caller
+      can pre-populate this.
+
+    In a real production application, reading the messages would be
+    in a separate application, and we'd need to be more sophisticated.
+    """
+    # The first 5 bytes should be a zero byte and then the schema id
+    message_header = message[:5]
+    zero_byte, schema_id = struct.unpack('>bI', message_header)
+    if zero_byte != 0:
+        raise ValueError(f'Avro message does not start with zero byte: {message}')
+
+    if schema_id in cached_schema:
+        parsed_schema = cached_schema[schema_id]
+    else:
+        logging.info(f'Looking up schema {schema_id}')
+        r = httpx.get(f'{schema_uri}/schemas/ids/{schema_id}')
+        r.raise_for_status()
+        logging.info(f'Response is {r}')
+
+        schema_as_str = r.text
+
+        avro_schema = json.loads(schema_as_str)
+        parsed_schema = get_parsed_avro_schema(avro_schema['schema'])
+        # Remember it for later
+        cached_schema[schema_id] = parsed_schema
+
+
+    message_data = io.BytesIO(message[5:])
+
+    reader = avro.io.DatumReader(parsed_schema)
+    decoder = avro.io.BinaryDecoder(message_data)
+    event_dict = reader.read(decoder)
+    return Event(**event_dict)

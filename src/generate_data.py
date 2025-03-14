@@ -91,7 +91,7 @@ class FakeEventCreator:
         """Move time fowards and return an Event
         """
         self.now = self.now + datetime.timedelta(milliseconds=elapsed_ms)
-        microseconds_since_epoch = int(self.now.timestamp() * 1000_000)
+        microseconds_since_epoch = int(self.now.timestamp() * 1_000_000)
 
         return Event(
             **dict(self.cookie),
@@ -157,7 +157,9 @@ async def send_messages_to_kafka(
 
     try:
         for event in generate_session(geoip):
-            print(f'EVENT {event}')
+            # Don't tell the `to_str` method our session id, as we want to see it
+            # printed out (and *of course* it will be "our" session id!)
+            print(event.to_str(''))
             raw_bytes = make_avro_payload(event, schema_id, parsed_schema)
             # For the moment, don't let it buffer messages
             await producer.send_and_wait(topic_name, raw_bytes)
@@ -207,7 +209,7 @@ def main():
     # can be used when envoding/decoding message data
     parsed_schema = get_parsed_avro_schema(schema)
 
-    schema_id = register_avro_schema(args.schema_uri, schema, TOPIC_NAME)
+    schema_id = register_avro_schema(args.schema_uri, TOPIC_NAME, schema)
 
     with asyncio.Runner() as runner:
         runner.run(send_messages_to_kafka(

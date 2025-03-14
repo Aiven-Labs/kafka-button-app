@@ -111,8 +111,8 @@ def setup_avro_schema():
 
     lifespan_data.avro_schema_id = register_avro_schema(
         SCHEMA_REGISTRY_URI,
-        lifespan_data.avro_schema,
         TOPIC_NAME,
+        lifespan_data.avro_schema,
     )
 
 

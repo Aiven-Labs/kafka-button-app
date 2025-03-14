@@ -2107,3 +2107,8 @@ Aiven articles on Kafka -> ClickHouse - need to clarify which is best for what
   is the article we took some guidance from, although it uses JSON messages.
   
 
+
+## Consumer script
+
+
+`src/simple_consumer.py` is a consumer that will read and report on events.
