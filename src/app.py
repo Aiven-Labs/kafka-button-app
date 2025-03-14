@@ -11,6 +11,7 @@ The following must be provided, either as environment variables or in a `.env` f
 """
 
 import datetime
+import json
 import logging
 import os
 import pathlib
@@ -21,7 +22,9 @@ from typing import Optional, Any
 
 import avro.schema
 import dotenv
+import httpx
 
+from aiochclient import ChClient
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
 from fastapi import FastAPI, Request
@@ -47,6 +50,12 @@ from .message_support import make_avro_payload
 
 logging.basicConfig(level=logging.INFO)
 
+# However, httpx will log all GET and POST requests at level INFO,
+# includingthe full URI, with any embedded passwords :(
+# We definitely want to disable that - for instance it would
+# show our Karapace password when registering a schema
+logging.getLogger('httpx').setLevel(logging.ERROR)
+
 # The geoip2fast dataset we want to use. Note that this is one we need to
 # download ourselves.
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
@@ -58,6 +67,13 @@ dotenv.load_dotenv()
 
 KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
+
+# The ClickHouse connection information, for the `stats` page
+CH_HOST = os.getenv("CH_HOST")
+CH_PORT = os.getenv("CH_PORT")  # but beware this is still a string
+CH_USERNAME = os.getenv("CH_USERNAME")
+CH_PASSWORD = os.getenv("CH_PASSWORD")
+CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", 'button_presses')
 
 CERTS_FOLDER = pathlib.Path("certs")
 
@@ -77,6 +93,7 @@ class LifespanData:
     avro_schema: str
     parsed_avro_schema: avro.schema.RecordSchema
     avro_schema_id: int
+    #async_ch_client: Optional[CHClient]
 
 
 lifespan_data = LifespanData()
@@ -271,4 +288,57 @@ async def send_ip(request: Request):
     cookie_str = cookie.model_dump_json()
     response.set_cookie(key=COOKIE_NAME, value=cookie_str, expires=COOKIE_LIFETIME)
 
+    return response
+
+
+@app.get("/stats", response_class=HTMLResponse)
+async def get_ch_stats(request: Request):
+    """Report statistics from ClickHouse."""
+
+    logging.info('HI HI ClickHouse stats page')
+    logging.info(f'request.cookies {request.cookies}')
+
+    cookie = get_cookie_from_request(request)
+    cookie_dict = dict(cookie)
+
+    # We do not want to re-connect every page refresh, but this is just for
+    # making sure I *can* connect!
+    logging.info('Connecting to ClickHouse')
+    port = int(CH_PORT)
+    logging.info(f'{CH_HOST=!r}, {port=!r}, {CH_USERNAME=!r}, {CH_PASSWORD=!r}')
+    async with httpx.AsyncClient() as session:
+        client = ChClient(
+            session,
+            url=f'https://{CH_HOST}:{port}',   # if this works, use a CH_SERVICE_URI value
+            user=CH_USERNAME,
+            password=CH_PASSWORD,
+            database='default',
+        )
+
+        alive = await client.is_alive()
+        logging.info(f'ClickHouse is alive? {alive}')
+
+        # Icky use of f string - the docs don't make it clear if we can do better
+        query_str = f"SELECT COUNT(*) FROM {CH_TABLE_NAME} WHERE session_id = {cookie_dict['session_id']!r}"
+        logging.info(f'Query {query_str}')
+        row = await client.fetchrow(query_str)
+        count_for_this_session = row[0]
+
+        query_str = f"SELECT COUNT(*) FROM {CH_TABLE_NAME} WHERE country_name = {cookie_dict['country_name']!r}"
+        logging.info(f'Query {query_str}')
+        row = await client.fetchrow(query_str)
+        count_for_this_country = row[0]
+
+        logging.info(f'Query response is {row=} {row[0]=}')
+
+    response = HTMLResponse(f"""\
+    <html>
+    <head><h1>Statistics</h1></head>
+    <body>
+    <p>Current session is {cookie.to_str()}</p>
+    <p>Number of button presses for current session is {count_for_this_session}</p>
+    <p>Number of button presses for {cookie_dict['country_name']} is {count_for_this_country}</p>
+    <p><a href="/">Back to the button</a></p>
+    </html>
+    """)
     return response

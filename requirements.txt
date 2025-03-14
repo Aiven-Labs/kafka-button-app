@@ -4,3 +4,4 @@ python_dotenv
 geoip2fast
 avro
 httpx
+aiochclient

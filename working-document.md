@@ -2105,10 +2105,123 @@ Aiven articles on Kafka -> ClickHouse - need to clarify which is best for what
 * [Connecting Apache Kafka® and Aiven for
   ClickHouse®](https://aiven.io/developer/connecting-kafka-and-clickhouse#persist-kafka-messages-in-clickhouse-table)
   is the article we took some guidance from, although it uses JSON messages.
-  
-
 
 ## Consumer script
 
 
 `src/simple_consumer.py` is a consumer that will read and report on events.
+
+## Plans for the other webpages
+
+
+1. A page showing analysis from ClickHouse - for instance (MVP):
+
+    * Time this session started
+    * Number of presses in this session
+    * Number of presses from the same:
+    
+        * Country
+        * Subdivision (if we have one)
+        * City (if we have one)
+
+2. A page showing output from a Kafka consumer
+
+   How much can it show? Keep it simple.
+
+## Which Python ClickHouse package?
+
+Sensible candidates (that have recent maintenance history) appear to be
+
+* [ClickHouse Connect](https://clickhouse.com/docs/integrations/python), as
+  described on the ClickHouse website. This would presumably be the "obvious"
+  default to use. It claims to be in Beta. It's [on github](https://github.com/ClickHouse/clickhouse-connect)
+ 
+  In the section [Multithreaded, Multiprocess, and Async/Event Driven Use
+  Cases](https://clickhouse.com/docs/integrations/python#multithreaded-multiprocess-and-asyncevent-driven-use-cases)
+  it says "ClickHouse Connect works well in multi-threaded, multiprocess, and
+  event loop driven/asynchronous applications." and then gives an `awync`
+  example at [AsyncClient wrapper](https://clickhouse.com/docs/integrations/python#asyncclient-wrapper)
+ 
+* [clickhouse-driver](https://clickhouse-driver.readthedocs.io/en/latest/index.html)
+  ([github](https://github.com/mymarilyn/clickhouse-driver)) appears to be
+  what the Aiven documentation suggests. However, as it says at [Async and
+  multithreading](https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#async-and-multithreading)
+  it doesn't help with asynchronous use.
+ 
+  There is an asynchronous wrapper at
+  [aioch](https://github.com/mymarilyn/aioch) but that doesn't appear to have
+  had a commit for 3 years.
+ 
+* [asynch](https://github.com/long2ice/asynch) looks interesting - it says it
+  "reuses most of clickhouse-driver features" and "complies with
+  [PEP-249(https://www.python.org/dev/peps/pep-0249/)]" (the Python Database
+  API Specification v2.0).
+ 
+* [aiochclient](https://github.com/maximdanilchenko/aiochclient) also looks
+  interesting, and has explicit support for `aiohttp` and `httpx`
+
+In the end, for the moment, I think that `clickhouse-connect` looks like the
+sensible place to start
+
+## Adding a `/stats` page to the app
+
+We need the ClickHouse service connection data.
+
+> **Note** that `clickhouse-connect` talks over HTTPS, not the wire protocol,
+> so it wants the HTTPS port, which we can see with
+> ```
+> ; avn service get $CH_SERVICE_NAME --json | jq '.components | map(select(.component == "clickhouse_https"))'
+> ```
+
+So, remembering the `-r` to remove any extraneous quoting:
+```
+; set CH_HOST (avn service get $CH_SERVICE_NAME --json | jq -r '.components | map(select(.component == "clickhouse_https"))[0].host')
+```
+
+The username and password are simpler :)
+```
+; set -x CH_USERNAME (avn service get $CH_SERVICE_NAME --json | jq -r '.service_uri_params.user')
+; set -x CH_PASSWORD (avn service get $CH_SERVICE_NAME --json | jq -r '.service_uri_params.password')
+```
+
+Unfortunately, trying to connect (with either `get_client` or
+`get_async_client`) gives me an error:
+```
+urllib3.exceptions.ProtocolError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))
+```
+(and that's whether I use the HTTP or native port).
+
+So let's try a different library...
+
+...let's try `asynch`, as it advertises as like clickhouse-driver, which
+is/was the other main ClickHouse Python library.
+
+The connect callable will take a full URI (with password, etc.) or the
+parts we defined already, so since we've got those, let's use them.
+
+Unfortunately, now I get
+```
+asynch.errors.UnexpectedPacketFromServerError: Code: 102. Unexpected packet from server tibs-button-ch-devrel-tibs.b.aivencloud.com:10144 (expected Hello or Exception, got Unknown packet)
+```
+(and yes, I get the same if I use port 10143, even though that's not the port
+I would expect)
+
+---
+
+Trying the other other client
+```
+; pip install aiochclient[httpx]
+```
+
+...and at least with this one I can get a response back!
+
+So I can get nice reporting back, but I still need to:
+
+1. Adjust the environment variables to have a SERVICE_URI instead of HOST and
+   PORT
+2. Move the creation of the ClickHouse connection up into shared space, so
+   it's only done once
+3. Ideally, make it only happen if the appropriate environment variables are
+   set (so we don't make the app depend on having a ClickHouse service)
+4. Which means the `stats` page will need to do something sensible if there
+   isn't a connection :)

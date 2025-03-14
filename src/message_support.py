@@ -75,6 +75,20 @@ class Cookie(BaseModel):
     subdivision_code: str    # may be ''
     city_name: str           # may be ''
 
+    def to_str(self) -> str:
+        parts = []
+        parts.append(self.session_id)
+        parts.append(f'[{self.cohort}]')
+        if self.country_code:
+            parts.append(f'{self.country_name} ({self.country_code})')
+        else:
+            parts.append(f'{self.country_name}')
+        if self.subdivision_name:
+            parts.append(f'{self.subdivision_name} {(self.subdivision_code)}')
+        if self.city_name:
+            parts.append(self.city_name)
+        return ' '.join(parts)
+
 
 def new_cookie(
         geoip: GeoIP2Fast,
