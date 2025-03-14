@@ -132,7 +132,7 @@ app = FastAPI(
 )
 
 # Set up templates
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="src/templates")
 
 
 def get_client_ip(request: Request) -> str:
