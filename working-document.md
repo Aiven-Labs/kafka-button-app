@@ -2056,3 +2056,54 @@ Query id: bc25838b-e3b4-413b-acd6-392622b62231
 ```
 
 So all seems good.
+
+## Some useful links
+
+Some links on PostgreSQL would probably be good, but honestly the actual
+documentation is excellent.
+
+Also some links on the JDBC connector and writing to PG.
+
+[Karapace](https://www.karapace.io/)
+
+ClickHouse documentation [Using Materialized Views in
+ClickHouse](https://clickhouse.com/blog/using-materialized-views-in-clickhouse)
+
+ClickHouse on [Creating Tables in
+ClickHouse](https://clickhouse.com/docs/guides/creating-tables) which is
+useful for its explanation of their interpretation of Primary Keys.
+Note that our table could probably be better designed.
+
+[Apache Avro specification](https://avro.apache.org/docs/1.11.1/specification)
+
+ClickHouse on
+[AvroConfluent](https://clickhouse.com/docs/interfaces/formats/AvroConfluent)
+messages
+
+ClickHouse SQL reference on
+[DateTime](https://clickhouse.com/docs/sql-reference/data-types/datetime) and
+[DateTime64](https://clickhouse.com/docs/sql-reference/data-types/datetime64)
+
+> **Note** I only just found that last, and it's now clear I can actually
+> specify `DateTime64(6, 'UTC')` which is probably what I wanted.
+
+Aiven's documentation on the formats available for messages in the
+Kafka/ClickHouse integration [Formats for Aiven for ClickHouse® - Aiven for Apache Kafka® data exchange
+](https://aiven.io/docs/products/clickhouse/reference/supported-input-output-formats)
+
+Aiven's documentation on [Connect Apache Kafka® to Aiven for ClickHouse®](https://aiven.io/docs/products/clickhouse/howto/integrate-kafka)
+
+[Get things done with the Aiven CLI](https://aiven.io/developer/aiven-cmdline)
+(with PostgreSQL examples)
+
+Aiven articles on Kafka -> ClickHouse - need to clarify which is best for what
+* [Stream data from Apache Kafka® to ClickHouse® for real-time
+  analytics](https://aiven.io/developer/stream-data-from-apache-kafkar-to-clickhouser-for-real-time-analytics)
+* [Aiven for Apache Kafka® as a source for Aiven for
+  ClickHouse®](https://aiven.io/developer/kafka-source-for-clickhouse) shows
+  how to use Terraform for setting things up
+* [Connecting Apache Kafka® and Aiven for
+  ClickHouse®](https://aiven.io/developer/connecting-kafka-and-clickhouse#persist-kafka-messages-in-clickhouse-table)
+  is the article we took some guidance from, although it uses JSON messages.
+  
+
