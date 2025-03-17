@@ -2189,7 +2189,12 @@ Unfortunately, trying to connect (with either `get_client` or
 ```
 urllib3.exceptions.ProtocolError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))
 ```
-(and that's whether I use the HTTP or native port).
+and further down the stack
+```
+clickhouse_connect.driver.exceptions.OperationalError: Error ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer')) executing HTTP request attempt 2 (http://tibs-button-ch-devrel-tibs.b.aivencloud.com:10144)
+```
+(and that's whether I use the HTTPS or native port). And *of course* I don't
+expect an `http://` connection to work for an Aiven service :(
 
 So let's try a different library...
 
@@ -2225,3 +2230,13 @@ So I can get nice reporting back, but I still need to:
    set (so we don't make the app depend on having a ClickHouse service)
 4. Which means the `stats` page will need to do something sensible if there
    isn't a connection :)
+   
+---
+
+Oh, it's in the
+[documentation](https://clickhouse.com/docs/integrations/python#client-creation-examples) -
+for `clickhouse_connect` I need to pass the `secure=True` parameter to ask it
+to use HTTPS. And if I do that (and use the HTTPS port) then I can get a
+connection.
+
+So later on I shall convert the app code to using `clickhouse_connect`...
