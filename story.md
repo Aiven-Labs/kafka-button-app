@@ -109,8 +109,8 @@ Avro and why we use it
 * the Confluent adaptation where the schema id goes on each message
 * Karapace
 * show the code to add the schema id to a message
-* can I find Ryan's talk about working with schema changes in Avro streams?
-  If so, link it
+* reference Ryan's talk about working with schema changes in Avro streams -
+  the link is at the end.
 
 * The Karapace schema - or, more accurately, the JSON definition of the Avro
   schema which we are going to store in Karapace
@@ -175,3 +175,13 @@ Other things we might talk about:
 * Consider using Grafana to monitor all the services
 * Maybe show the console tools > data flow page, which shows services and how
   integrations link them (but not connectors)
+
+Links:
+* Dive into Avro: *Everything* a Data Engineer needs to know, by Ryan Skraba
+  and Ismaël Mejía
+  * "Apache Avro™ is the leading serialization format for record data, and
+    first choice for streaming data pipelines."
+  * Including a discussion of schema evolution
+  * [PDF
+    slides](https://www.apachecon.com/acna2022/slides/02_SkrabaMejia_Dive_into_Avro.pdf)
+  * [Video from ApacheCon 2022](https://www.youtube.com/watch?v=0HsMaiLbXFk)
