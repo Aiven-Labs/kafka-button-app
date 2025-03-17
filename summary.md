@@ -186,7 +186,7 @@ later on.
 CREATE TABLE button_presses (
     "id" bigint generated always as identity primary key,
     "session_id" uuid not null,
-    "timestamp" char(32) not null,
+    "timestamp" bigint,
     "cohort" smallint,
     "action" text not null,
     "country_name" text not null,
