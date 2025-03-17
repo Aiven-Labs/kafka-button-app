@@ -2,6 +2,16 @@
 
 ...working out the story before I commit to slides
 
+Products and services we mention
+* Apache Kafka®
+* Apache Kafka® Connect
+* Apache Avro™️
+* PostgreSQL®
+* ClickHouse®
+* Karapace
+* perhaps mention of §OpenSearch®, Grafana®
+* and of course Aiven
+
 Show the app and get people to press buttons
 * show the Kafka stream (either by looking at the app page if we've got one,
   or by showing the output of the simple consumer app)
@@ -185,3 +195,13 @@ Links:
   * [PDF
     slides](https://www.apachecon.com/acna2022/slides/02_SkrabaMejia_Dive_into_Avro.pdf)
   * [Video from ApacheCon 2022](https://www.youtube.com/watch?v=0HsMaiLbXFk)
+  * That summary slide from their talk:
+
+    > **What is Avro?**
+    >
+    > * A File Format? A data format?
+    > * A data model?
+    > * A code generator?
+    > * A serializer for my existing code?
+    > * **"Apache Avro™ is the leading serialization format for record data,
+    >   and first choice for streaming data pipelines."**
