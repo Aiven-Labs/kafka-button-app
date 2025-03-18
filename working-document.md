@@ -2191,7 +2191,7 @@ urllib3.exceptions.ProtocolError: ('Connection aborted.', ConnectionResetError(5
 ```
 and further down the stack
 ```
-clickhouse_connect.driver.exceptions.OperationalError: Error ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer')) executing HTTP request attempt 2 (http://tibs-button-ch-devrel-tibs.b.aivencloud.com:10144)
+clickhouse_connect.driver.exceptions.OperationalError: Error ('Connection aborted.', ConnectionResetError(54, 'Connection rGeset by peer')) executing HTTP request attempt 2 (http://tibs-button-ch-devrel-tibs.b.aivencloud.com:10144)
 ```
 (and that's whether I use the HTTPS or native port). And *of course* I don't
 expect an `http://` connection to work for an Aiven service :(
@@ -2240,3 +2240,52 @@ to use HTTPS. And if I do that (and use the HTTPS port) then I can get a
 connection.
 
 So later on I shall convert the app code to using `clickhouse_connect`...
+
+## Docker
+
+We want a docker file so we can run the app other than locally.
+
+We assume we're going to pass in the following environment variables
+
+* Aiven username -> `AIVEN_USERNAME`
+* Aiven token -> `AIVEN_TOKEN`
+* Kafka service name: `KAFKA_SERVICE_NAME`
+* Postgres service name: `PG_SERVICE_NAME`
+* ClickHouse service name: `CH_SERVICE_NAME`
+
+The container can then use the `avn` command to deduce other values and
+download the Kafka certificate files. And of course using a token means we can
+impose a lifetime on how long the app can access the resources (and revoke its
+access if needs be)
+
+Ah! We can take inspiration from
+https://github.com/Aiven-Labs/fake-data-producer-for-apache-kafka-docker/
+and its
+[`run.sh`](https://github.com/Aiven-Labs/fake-data-producer-for-apache-kafka-docker/blob/main/run.sh)
+file, and use the fact that the base `avn` command can take an `--auth-token`
+switch.
+
+And that `run.sh` includes an example of getting the Kafka certificates - just
+what we want!
+
+```
+set -x PROJECT_NAME devrel-tibs
+```
+
+```
+set -x AIVEN_TOKEN <<the value of my Aiven token>>
+```
+
+```
+; docker build -t appimage .
+```
+
+```
+; docker run -d --name kafka_button_container \
+    -p 3000:3000 \
+    -e AIVEN_TOKEN=$AIVEN_TOKEN \
+    -e PROJECT_NAME=$PROJECT_NAME \
+    -e KAFKA_SERVICE_NAME=$KAFKA_SERVICE_NAME \
+    -e CH_SERVICE_NAME=$CH_SERVICE_NAME \
+    appimage
+```

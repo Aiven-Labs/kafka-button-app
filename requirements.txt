@@ -1,3 +1,4 @@
+aiven_client
 fastapi[standard]
 aiokafka
 python_dotenv
@@ -5,3 +6,4 @@ geoip2fast
 avro
 httpx
 aiochclient
+# clickhouse_connect
