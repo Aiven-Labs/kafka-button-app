@@ -2,6 +2,8 @@
 certs/
 # JSON files we use for Kafka connector definitions
 *.json
+# Our city data file
+geoip2fast-city-ipv6.dat.gz
 
 # A locally installed clickhouse binary
 clickhouse
