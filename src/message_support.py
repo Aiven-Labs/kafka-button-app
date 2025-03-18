@@ -29,6 +29,8 @@ logging.basicConfig(level=logging.INFO)
 # The geoip2fast dataset we want to use. Note that this is one we need to
 # download ourselves.
 GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
+# Or one we don't have to download because it's already there
+GEOIP_DATASET_FILENAME = 'geoip2fast-ipv6.dat.gz'
 
 
 def load_geoip_data() -> GeoIP2Fast:

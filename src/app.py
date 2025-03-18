@@ -56,9 +56,6 @@ logging.basicConfig(level=logging.INFO)
 # show our Karapace password when registering a schema
 logging.getLogger('httpx').setLevel(logging.ERROR)
 
-# The geoip2fast dataset we want to use. Note that this is one we need to
-# download ourselves.
-GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
 
 # If there's a `.env` file, load it.
 # If a value in the .env file already exists as a system environment variable,
