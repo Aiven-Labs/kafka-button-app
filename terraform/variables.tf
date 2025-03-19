@@ -9,7 +9,7 @@ variable "aiven_project_name" {
 }
 
 variable "cloud_name" {
-  description = "The cloud provider and region for Aiven services. Example: google-us-east-1"
+  description = "The cloud provider and region for Aiven services. Example: google-us-east1"
   type        = string
 }
 
