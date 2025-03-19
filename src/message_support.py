@@ -17,6 +17,7 @@ from typing import Optional, Any
 import avro
 import avro.io
 import avro.schema
+import dotenv
 import httpx
 
 from geoip2fast import GeoIP2Fast
@@ -28,11 +29,16 @@ logging.basicConfig(level=logging.INFO)
 import os
 logging.info(f'Current directory is {os.getcwd()}')
 
-# The geoip2fast dataset we want to use. Note that this is one we need to
-# download ourselves.
-GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
-# Or one we don't have to download because it's already there
-# GEOIP_DATASET_FILENAME = 'geoip2fast-ipv6.dat.gz'
+dotenv.load_dotenv()
+
+USE_BIG_GEOIP_FILE = os.getenv("USE_BIG_GEOIP_FILE", False)
+if USE_BIG_GEOIP_FILE:
+    # The geoip2fast dataset we want to use. Note that this is one we need to
+    # download ourselves.
+    GEOIP_DATASET_FILENAME = 'geoip2fast-city-ipv6.dat.gz'
+else:
+    # Or one we don't have to download because it's already there
+    GEOIP_DATASET_FILENAME = 'geoip2fast-ipv6.dat.gz'
 
 
 def load_geoip_data() -> GeoIP2Fast:
