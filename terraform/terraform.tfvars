@@ -1,0 +1,5 @@
+aiven_project_name      = "devrel-jay"
+cloud_name              = "google-us-east1"
+clickhouse_service_name = "ch-button-app"
+pg_service_name         = "pg-button-app"
+kafka_service_name      = "kafka-button-app"
