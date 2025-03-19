@@ -81,7 +81,7 @@ DEFAULT_COHORT = 0
 
 # If this is True, and the apparent IP address is 127.0.0.1 (localhost),
 # then generate a fake IP address instead
-FAKE_DATA = True
+FAKE_IP_IF_LOCALHOST = True
 
 
 class LifespanData:
@@ -162,7 +162,7 @@ def get_client_ip(request: Request) -> str:
 
 def get_ip_address(request: Request) -> str:
     ip_address = get_client_ip(request)
-    if FAKE_DATA and ip_address == '127.0.0.1':
+    if FAKE_IP_IF_LOCALHOST and ip_address == '127.0.0.1':
         # Because localhost isn't much fun...
         ip_address = lifespan_data.geoip.generate_random_ipv4_address()
         logging.info(f"We're at 1227.0.0.1 which is boring; pretending to be at {ip_address}")
