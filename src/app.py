@@ -330,12 +330,19 @@ async def get_ch_stats(request: Request):
 
     response = HTMLResponse(f"""\
     <html>
-    <head><h1>Statistics</h1></head>
+    <head>
+        <h1>Statistics</h1>
+    </head>
     <body>
     <p>Current session is {cookie.to_str()}</p>
     <p>Number of button presses for current session is {count_for_this_session}</p>
     <p>Number of button presses for {cookie_dict['country_name']} is {count_for_this_country}</p>
-    <p><a href="/">Back to the button</a></p>
+    <p></p>
+    <hr>
+    <p></p>
+    <form action="/" method="get">
+    <input type="submit" value="Back to the button" />
+    </form>
     </html>
     """)
     return response
