@@ -1,6 +1,6 @@
 resource "aiven_kafka" "kafka_button_app" {
   project      = data.aiven_project.button_app.project
-  service_name = "${var.kafka_service_name}-${random_string.suffix.result}"
+  service_name = "kafka-button-app-${random_string.suffix.result}"
   cloud_name   = var.cloud_name
   plan         = "business-4"
 
