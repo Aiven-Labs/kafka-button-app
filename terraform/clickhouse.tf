@@ -4,3 +4,8 @@ resource "aiven_clickhouse" "ch_button_app" {
   plan         = "startup-16"
   service_name = "${var.clickhouse_service_name}-${random_string.suffix.result}"
 }
+
+
+output "clickhouse_service_name" {
+  value = aiven_clickhouse.ch_button_app.service_name
+}
