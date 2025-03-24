@@ -12,18 +12,3 @@ variable "cloud_name" {
   description = "The cloud provider and region for Aiven services. Example: google-us-east1"
   type        = string
 }
-
-variable "clickhouse_service_name" {
-  description = "The service name for the Aiven for Clickhouse Instance"
-  type        = string
-}
-
-variable "pg_service_name" {
-  description = "The service name for the Aiven for postgreSQL Instance"
-  type        = string
-}
-
-variable "kafka_service_name" {
-  description = "The service name for the Aiven for Apache Kafka Instance"
-  type        = string
-}

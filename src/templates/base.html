@@ -1,0 +1,47 @@
+{% set title="Don't Push the Button" %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="https://fav.farm/crab" />
+    <title>{{title}}</title>
+    <!-- HTMX for seamless interactions -->
+    <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      {% block style %}
+      {% endblock %}
+    </style>
+  </head>
+  <body class="bg-gray-100 items-center h-screen justify-between flex flex-col">
+    <header class="header border-b-4 p-2 mt-4 mb-4 grid grid-cols-6">
+      <div class="px-3 font-bold">
+        <a class="hover:underline" href="/">{{title}}</a>
+      </div>
+      <nav class="item-end flex">
+        <div class="decoration-none mx-3">
+          <a class="hover:underline hover:font-semibold" href="/">Home</a>
+        </div>
+        <div>
+          <a class="hover:underline hover:font-semibold" href="/stats">Stats</a>
+        </div>
+      </nav>
+    </header>
+    {% block content %} {% endblock %}
+
+    <footer class="mb-4">
+      <div
+        class="mt-8 pt-4 border-t border-gray-200 text-center text-xs text-gray-500 flex"
+      >
+        <p>FastAPI + HTMX + Kafka Demo</p>
+        <p>
+          <a href="/https://github.com/Aiven-Labs/kafka_button_app/"
+            >view GitHub</a
+          >
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
