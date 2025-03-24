@@ -341,7 +341,7 @@ async def get_ch_stats(request: Request):
     }
     result = await lifespan_data.ch_client.command(
         "SELECT COUNT(*) FROM {table:Identifier}"
-        " WHERE country_name = {country_name:String} AND timestamp > {one_hour_ago:Integer}",
+        " WHERE country_name = {country_name:String} AND timestamp > {one_hour_ago:DateTime64(6,'UTC')}",
         parameters=parameters,
     )
     count_for_this_hour = result
