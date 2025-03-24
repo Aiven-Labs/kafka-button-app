@@ -45,6 +45,12 @@ from message_support import make_avro_payload
 
 logging.basicConfig(level=logging.INFO)
 
+# However, httpx will log all GET and POST requests at level INFO,
+# includingthe full URI, with any embedded passwords :(
+# We definitely want to disable that - for instance it would
+# show our Karapace password when registering a schema
+logging.getLogger('httpx').setLevel(logging.ERROR)
+
 
 # Command line default values
 DEFAULT_CERTS_FOLDER = "certs"
