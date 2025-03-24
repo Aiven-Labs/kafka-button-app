@@ -330,6 +330,23 @@ async def get_ch_stats(request: Request):
     )
     count_for_this_country = result
 
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    one_hour_ago = now_utc - datetime.timedelta(hours=1)
+    microseconds_since_epoch = int(one_hour_ago.timestamp() * 1000_000)
+
+    parameters = {
+        "table": CH_TABLE_NAME,
+        "country_name": cookie_dict['country_name'],
+        "one_hour_ago": microseconds_since_epoch,
+    }
+    result = await lifespan_data.ch_client.command(
+        "SELECT COUNT(*) FROM {table:Identifier}"
+        " WHERE country_name = {country_name:String} AND timestamp > {one_hour_ago:Integer}",
+        parameters=parameters,
+    )
+    count_for_this_hour = result
+
+
     response = HTMLResponse(f"""\
     <html>
     <head>
@@ -339,6 +356,7 @@ async def get_ch_stats(request: Request):
     <p>Current session is {cookie.to_str()}</p>
     <p>Number of button presses for current session is {count_for_this_session}</p>
     <p>Number of button presses for {cookie_dict['country_name']} is {count_for_this_country}</p>
+    <p>Number of button presses for {cookie_dict['country_name']} in the last hour is {count_for_this_hour}</p>
     <p></p>
     <hr>
     <p></p>
