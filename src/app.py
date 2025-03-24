@@ -21,10 +21,10 @@ from contextlib import asynccontextmanager
 from typing import Optional, Any
 
 import avro.schema
+import clickhouse_connect
 import dotenv
 import httpx
 
-from aiochclient import ChClient
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
 from fastapi import FastAPI, Request
@@ -67,7 +67,7 @@ SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 # The ClickHouse connection information, for the `stats` page
 CH_HOST = os.getenv("CH_HOST")
-CH_PORT = os.getenv("CH_PORT")  # but beware this is still a string
+CH_PORT = int(os.getenv("CH_PORT"))    # this will be nasty if it's unset :(
 CH_USERNAME = os.getenv("CH_USERNAME")
 CH_PASSWORD = os.getenv("CH_PASSWORD")
 CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", 'button_presses')
@@ -90,7 +90,7 @@ class LifespanData:
     avro_schema: str
     parsed_avro_schema: avro.schema.RecordSchema
     avro_schema_id: int
-    #async_ch_client: Optional[CHClient]
+    ch_client: Optional[clickhouse_connect.driver.AsyncClient]
 
 
 lifespan_data = LifespanData()
@@ -111,6 +111,17 @@ async def start_producer() -> AIOKafkaProducer:
     )
     await producer.start()
     return producer
+
+
+async def get_ch_client() -> clickhouse_connect.driver.AsyncClient:
+    return await clickhouse_connect.get_async_client(
+        host=CH_HOST,
+        port=int(CH_PORT),
+        user=CH_USERNAME,
+        password=CH_PASSWORD,
+        database='default',
+        secure=True,
+    )
 
 
 def setup_avro_schema():
@@ -135,6 +146,7 @@ async def lifespan(app: FastAPI):
     lifespan_data.geoip = load_geoip_data()
     setup_avro_schema()
     lifespan_data.producer = await start_producer()
+    lifespan_data.ch_client = await get_ch_client()
     yield
     await lifespan_data.producer.stop()
 
@@ -298,35 +310,25 @@ async def get_ch_stats(request: Request):
     cookie = get_cookie_from_request(request)
     cookie_dict = dict(cookie)
 
-    # We do not want to re-connect every page refresh, but this is just for
-    # making sure I *can* connect!
-    logging.info('Connecting to ClickHouse')
-    port = int(CH_PORT)
-    logging.info(f'{CH_HOST=!r}, {port=!r}, {CH_USERNAME=!r}, {CH_PASSWORD=!r}')
-    async with httpx.AsyncClient() as session:
-        client = ChClient(
-            session,
-            url=f'https://{CH_HOST}:{port}',   # if this works, use a CH_SERVICE_URI value
-            user=CH_USERNAME,
-            password=CH_PASSWORD,
-            database='default',
-        )
+    parameters = {
+        "table": CH_TABLE_NAME,
+        "session_id": cookie_dict['session_id'],
+    }
+    result = await lifespan_data.ch_client.command(
+        "SELECT COUNT(*) FROM {table:Identifier} WHERE session_id = {session_id:String}",
+        parameters=parameters,
+    )
+    count_for_this_session = result
 
-        alive = await client.is_alive()
-        logging.info(f'ClickHouse is alive? {alive}')
-
-        # Icky use of f string - the docs don't make it clear if we can do better
-        query_str = f"SELECT COUNT(*) FROM {CH_TABLE_NAME} WHERE session_id = {cookie_dict['session_id']!r}"
-        logging.info(f'Query {query_str}')
-        row = await client.fetchrow(query_str)
-        count_for_this_session = row[0]
-
-        query_str = f"SELECT COUNT(*) FROM {CH_TABLE_NAME} WHERE country_name = {cookie_dict['country_name']!r}"
-        logging.info(f'Query {query_str}')
-        row = await client.fetchrow(query_str)
-        count_for_this_country = row[0]
-
-        logging.info(f'Query response is {row=} {row[0]=}')
+    parameters = {
+        "table": CH_TABLE_NAME,
+        "country_name": cookie_dict['country_name'],
+    }
+    result = await lifespan_data.ch_client.command(
+        "SELECT COUNT(*) FROM {table:Identifier} WHERE country_name = {country_name:String}",
+        parameters=parameters,
+    )
+    count_for_this_country = result
 
     response = HTMLResponse(f"""\
     <html>

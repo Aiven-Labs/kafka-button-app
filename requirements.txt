@@ -5,5 +5,4 @@ python_dotenv
 geoip2fast
 avro
 httpx
-aiochclient
-# clickhouse_connect
+clickhouse_connect
