@@ -17,7 +17,7 @@ resource "aiven_kafka" "kafka_button_app" {
     kafka {
       group_max_session_timeout_ms = 70000
       log_retention_bytes          = 1000000000
-      auto_create_topics_enable    = true
+      auto_create_topics_enable    = false
     }
 
     public_access {
@@ -46,7 +46,6 @@ resource "aiven_kafka_topic" "button_app" {
     read   = "5m"
   }
 }
-
 
 output "kafka_service_name" {
   value = aiven_kafka.kafka_button_app.service_name
