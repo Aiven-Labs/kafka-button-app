@@ -1,23 +1,26 @@
 {% extends 'base.html' %} {% block content %}
 <section>
-  <h1>Statistics</h1>
-  <p>Current session is {{cookie.to_str()}}</p>
-  <p>
-    Number of button presses for current session is {{count_for_this_session}}
-  </p>
-  <p>
-    Number of button presses for {{cookie_dict['country_name']}} is
-    {{count_for_this_country}
-  </p>
-  <p>
-    Number of button presses for {{cookie_dict['country_name']}} in the last
-    hour is {{count_for_this_hour}}
-  </p>
-  <p></p>
-  <hr />
-  <p></p>
+
+  <h1 class="text-3xl font-extrabold dark:text-white mb-4">Statistics</h1>
+
+  <div class="flex flex-col space-y-4">
+  <p>Current session is <tt>{{cookie.to_str()}}</tt></p>
+  <p>Number of button presses for:</p>
+  </div>
+
+  <!--  <ul class="list-disc list-inside space-y-4"> -->
+  <ul class="list-inside list-disc">
+  <li>Current session is {{count_for_this_session}}
+  <li>{{cookie_dict['country_name']}} is {{count_for_this_country}}
+  <li>{{cookie_dict['country_name']}} in the last hour is {{count_for_this_hour}}
+  </ul>
+
   <form action="/" method="get">
-    <input type="submit" value="Back to the button" />
+    <input
+      class="bg-blue-400 text-white font-semibold py-3 px-3 rounded-2xl transition-colors shadow-xl mt-4"
+      type="submit"
+      value="Back to the button"
+     />
   </form>
 </section>
 

@@ -352,6 +352,8 @@ async def get_ch_stats(request: Request):
     count_for_this_hour = result
 
     context = {
+        "request": request,
+        "cookie": cookie,
         "cookie_dict": cookie_dict,
         "count_for_this_country": count_for_this_country,
         "count_for_this_session": count_for_this_session,
