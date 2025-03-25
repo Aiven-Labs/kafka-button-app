@@ -8,6 +8,13 @@ resource "aiven_kafka_connector" "kafka_pg_connector" {
   service_name   = aiven_kafka.kafka_button_app.service_name
   connector_name = "sink_button_presses_avro_karapace"
 
+  depends_on = [
+    aiven_kafka.kafka_button_app,
+    aiven_kafka_topic.button_app,
+    aiven_kafka_schema.button-app-schema,
+    aiven_pg.pg_button_app,
+  ]
+
   config = {
     "name"                                                 = "sink_button_presses_avro_karapace"
     "topics"                                               = aiven_kafka_topic.button_app.topic_name
@@ -31,9 +38,6 @@ resource "aiven_kafka_connector" "kafka_pg_connector" {
     "value.converter.schema.registry.basic.auth.user.info" = local.username_pwd
   }
 
-  timeouts {
-    create = "5m"
-  }
 }
 
 
