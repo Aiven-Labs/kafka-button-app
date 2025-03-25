@@ -147,9 +147,9 @@ Create my Kafka service.
 * `google-europe-west1` has tierd storage available, which I will care about
   in a moment.
 * We need at least `business-4` because we want integrations later on.
-* I'm going to create my topic explicitly, but I normally use
-  `--kafka.auto_create_topics_enable=true` for testing / demo purposes, as it
-  can be useful. Of course, it's not a good idea in production.
+* I'm going to create my topic explicitly. In development or testing, I often specify
+  `--kafka.auto_create_topics_enable=true`, but we don't need it here.
+  Of course, it's not a good idea in production.
 
 ```
 ; avn service create $KAFKA_SERVICE_NAME          \
@@ -157,8 +157,7 @@ Create my Kafka service.
           --cloud google-europe-west1             \
           --plan business-4                       \
           -c kafka_connect=true                   \
-          -c schema_registry=true                 \
-          -c kafka.auto_create_topics_enable=true
+          -c schema_registry=true
 ```
 
 We may need the actual service URI later on - let's get it (still fish)
