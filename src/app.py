@@ -268,10 +268,10 @@ async def get_index(request: Request):
     return response
 
 
-@app.post("/send-ip", response_class=HTMLResponse)
-async def send_ip(request: Request):
+@app.post("/send-event", response_class=HTMLResponse)
+async def send_event(request: Request):
     """
-    Endpoint that sends the IP to Kafka and returns the updated UI part
+    Endpoint that sends a button press event to Kafka and returns the updated UI part
     This is triggered by HTMX
     """
     logging.info('HI HI BUTTON')
