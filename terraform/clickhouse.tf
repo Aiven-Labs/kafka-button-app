@@ -9,8 +9,3 @@ resource "aiven_clickhouse" "ch_button_app" {
 output "clickhouse_service_name" {
   value = aiven_clickhouse.ch_button_app.service_name
 }
-
-
-output "clickhouse_service_name" {
-  value = aiven_clickhouse.ch_button_app.service_name
-}
