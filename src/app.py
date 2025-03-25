@@ -279,8 +279,6 @@ async def send_event(request: Request):
 
     cookie = get_cookie_from_request(request)
 
-    ip_address = get_client_ip(request)
-
     # Send our actual message to Kafka
     await send_avro_message(cookie, Action.PRESS_BUTTON)
 
