@@ -77,6 +77,12 @@ class Action(StrEnum):
 
 
 class Cookie(BaseModel):
+    """This is the information we store in a cookie, to identify a "session".
+
+    The session id is a UUID string, the cohort is None for fake data, and
+    otherwise could be used to "group" sessions. The location values are
+    looked up at the start of a "session", from the user's IP address.
+    """
     session_id: str
     cohort: int | None
     country_name: str
@@ -107,7 +113,6 @@ def new_cookie(
         cohort: Optional[int]=0,
 ) -> Cookie:
     """Calculate the cookie for a new 'session'
-
 
     * `geoip` is our GeoIP2Fast instance, which we use to look up IP addresses
         and get back location data
@@ -142,16 +147,14 @@ def new_cookie(
     )
 
 
-class Event(BaseModel):
-    session_id: str
+class Event(Cookie):
+    """The information we want to send to Kafka as an event / message
+
+    This is the "static" cookie information (that we look up once per
+    "session") plus the action and when it happened
+    """
     timestamp: int
-    cohort: int | None
     action: str
-    country_name: str
-    country_code: str
-    subdivision_name: str    # may be ''
-    subdivision_code: str    # may be ''
-    city_name: str           # may be ''
 
     def to_str(self, this_session_id: str) -> str:
         parts = []
