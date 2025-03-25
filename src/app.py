@@ -54,7 +54,7 @@ logging.basicConfig(level=logging.INFO)
 # includingthe full URI, with any embedded passwords :(
 # We definitely want to disable that - for instance it would
 # show our Karapace password when registering a schema
-logging.getLogger('httpx').setLevel(logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.ERROR)
 
 
 # If there's a `.env` file, load it.
@@ -67,15 +67,15 @@ SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 # The ClickHouse connection information, for the `stats` page
 CH_HOST = os.getenv("CH_HOST")
-CH_PORT = int(os.getenv("CH_PORT"))    # this will be nasty if it's unset :(
+CH_PORT = int(os.getenv("CH_PORT"))  # this will be nasty if it's unset :(
 CH_USERNAME = os.getenv("CH_USERNAME")
 CH_PASSWORD = os.getenv("CH_PASSWORD")
-CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", 'button_presses')
+CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", "button_presses")
 
 CERTS_FOLDER = pathlib.Path("certs")
 
-COOKIE_NAME = 'button_press_session'
-COOKIE_LIFETIME = 3600    # 1 hour
+COOKIE_NAME = "button_press_session"
+COOKIE_LIFETIME = 3600  # 1 hour
 
 DEFAULT_COHORT = 0
 
@@ -119,7 +119,7 @@ async def get_ch_client() -> clickhouse_connect.driver.AsyncClient:
         port=int(CH_PORT),
         user=CH_USERNAME,
         password=CH_PASSWORD,
-        database='default',
+        database="default",
         secure=True,
     )
 
@@ -174,10 +174,12 @@ def get_client_ip(request: Request) -> str:
 
 def get_ip_address(request: Request) -> str:
     ip_address = get_client_ip(request)
-    if FAKE_IP_IF_LOCALHOST and ip_address == '127.0.0.1':
+    if FAKE_IP_IF_LOCALHOST and ip_address == "127.0.0.1":
         # Because localhost isn't much fun...
         ip_address = lifespan_data.geoip.generate_random_ipv4_address()
-        logging.info(f"We're at 1227.0.0.1 which is boring; pretending to be at {ip_address}")
+        logging.info(
+            f"We're at 1227.0.0.1 which is boring; pretending to be at {ip_address}"
+        )
     return ip_address
 
 
@@ -192,7 +194,7 @@ async def send_avro_message(cookie: Cookie, action: Action):
         timestamp=microseconds_since_epoch,
         action=action,
     )
-    logging.info(f'Sending Avro message {event}')
+    logging.info(f"Sending Avro message {event}")
     message_bytes = make_avro_payload(
         event,
         lifespan_data.avro_schema_id,
@@ -206,37 +208,42 @@ async def send_avro_message(cookie: Cookie, action: Action):
 async def reset(request: Request):
     """For development/debugging - reset any cookies when we're visited"""
 
-    logging.info('HI HI RESET')
-    logging.info(f'request.cookies {request.cookies}')
-    logging.info(f'cookie {request.cookies.get(COOKIE_NAME)}')
+    logging.info("HI HI RESET")
+    logging.info(f"request.cookies {request.cookies}")
+    logging.info(f"cookie {request.cookies.get(COOKIE_NAME)}")
 
-    logging.info('Expiring cookie values')
+    logging.info("Expiring cookie values")
 
-    response = HTMLResponse("""\
+    response = HTMLResponse(
+        """\
     <html>
     <head><h1>Cookies are reset</h1></head>
     <body><p><a href="/">Back to the button</a></p>
     </html>
-    """)
+    """
+    )
     response.delete_cookie(key=COOKIE_NAME)
     return response
 
 
 def get_cookie_from_request(request: Request) -> Cookie:
-    """Get the cookie from the request. If there isn't one, make a new one.
-    """
-    logging.info(f'Retrieving cookie {COOKIE_NAME}')
+    """Get the cookie from the request. If there isn't one, make a new one."""
+    logging.info(f"Retrieving cookie {COOKIE_NAME}")
     cookie_str = request.cookies.get(COOKIE_NAME)
     if not cookie_str:
-        logging.info(f'No cookie found: making new')
-        cookie = new_cookie(lifespan_data.geoip, get_ip_address, request, DEFAULT_COHORT)
+        logging.info(f"No cookie found: making new")
+        cookie = new_cookie(
+            lifespan_data.geoip, get_ip_address, request, DEFAULT_COHORT
+        )
     else:
-        logging.info(f'Found cookie value {cookie_str}')
+        logging.info(f"Found cookie value {cookie_str}")
         try:
             cookie = Cookie.model_validate_json(cookie_str)
         except ValidationError:
-            logging.error(f'Unable to parse cookie {COOKIE_NAME} value {cookie_str}')
-            cookie = new_cookie(lifespan_data.geoip, get_ip_address, request, DEFAULT_COHORT)
+            logging.error(f"Unable to parse cookie {COOKIE_NAME} value {cookie_str}")
+            cookie = new_cookie(
+                lifespan_data.geoip, get_ip_address, request, DEFAULT_COHORT
+            )
     return cookie
 
 
@@ -244,8 +251,8 @@ def get_cookie_from_request(request: Request) -> Cookie:
 async def get_index(request: Request):
     """Render the main page with the button"""
 
-    logging.info('HI HI INDEX')
-    logging.info(f'request.cookies {request.cookies}')
+    logging.info("HI HI INDEX")
+    logging.info(f"request.cookies {request.cookies}")
 
     cookie = get_cookie_from_request(request)
 
@@ -274,8 +281,8 @@ async def send_event(request: Request):
     Endpoint that sends a button press event to Kafka and returns the updated UI part
     This is triggered by HTMX
     """
-    logging.info('HI HI BUTTON')
-    logging.info(f'request.cookies {request.cookies}')
+    logging.info("HI HI BUTTON")
+    logging.info(f"request.cookies {request.cookies}")
 
     cookie = get_cookie_from_request(request)
 
@@ -302,15 +309,15 @@ async def send_event(request: Request):
 async def get_ch_stats(request: Request):
     """Report statistics from ClickHouse."""
 
-    logging.info('HI HI ClickHouse stats page')
-    logging.info(f'request.cookies {request.cookies}')
+    logging.info("HI HI ClickHouse stats page")
+    logging.info(f"request.cookies {request.cookies}")
 
     cookie = get_cookie_from_request(request)
     cookie_dict = dict(cookie)
 
     parameters = {
         "table": CH_TABLE_NAME,
-        "session_id": cookie_dict['session_id'],
+        "session_id": cookie_dict["session_id"],
     }
     result = await lifespan_data.ch_client.command(
         "SELECT COUNT(*) FROM {table:Identifier} WHERE session_id = {session_id:String}",
@@ -320,7 +327,7 @@ async def get_ch_stats(request: Request):
 
     parameters = {
         "table": CH_TABLE_NAME,
-        "country_name": cookie_dict['country_name'],
+        "country_name": cookie_dict["country_name"],
     }
     result = await lifespan_data.ch_client.command(
         "SELECT COUNT(*) FROM {table:Identifier} WHERE country_name = {country_name:String}",
@@ -334,7 +341,7 @@ async def get_ch_stats(request: Request):
 
     parameters = {
         "table": CH_TABLE_NAME,
-        "country_name": cookie_dict['country_name'],
+        "country_name": cookie_dict["country_name"],
         "one_hour_ago": microseconds_since_epoch,
     }
     result = await lifespan_data.ch_client.command(
@@ -344,23 +351,12 @@ async def get_ch_stats(request: Request):
     )
     count_for_this_hour = result
 
+    context = {
+        "cookie_dict": cookie_dict,
+        "count_for_this_country": count_for_this_country,
+        "count_for_this_session": count_for_this_session,
+        "count_for_this_hour": count_for_this_hour,
+    }
 
-    response = HTMLResponse(f"""\
-    <html>
-    <head>
-        <h1>Statistics</h1>
-    </head>
-    <body>
-    <p>Current session is {cookie.to_str()}</p>
-    <p>Number of button presses for current session is {count_for_this_session}</p>
-    <p>Number of button presses for {cookie_dict['country_name']} is {count_for_this_country}</p>
-    <p>Number of button presses for {cookie_dict['country_name']} in the last hour is {count_for_this_hour}</p>
-    <p></p>
-    <hr>
-    <p></p>
-    <form action="/" method="get">
-    <input type="submit" value="Back to the button" />
-    </form>
-    </html>
-    """)
+    response = templates.TemplateResponse("stats.html", context)
     return response

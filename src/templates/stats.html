@@ -1,0 +1,24 @@
+{% extends 'base.html' %} {% block content %}
+<section>
+  <h1>Statistics</h1>
+  <p>Current session is {{cookie.to_str()}}</p>
+  <p>
+    Number of button presses for current session is {{count_for_this_session}}
+  </p>
+  <p>
+    Number of button presses for {{cookie_dict['country_name']}} is
+    {{count_for_this_country}
+  </p>
+  <p>
+    Number of button presses for {{cookie_dict['country_name']}} in the last
+    hour is {{count_for_this_hour}}
+  </p>
+  <p></p>
+  <hr />
+  <p></p>
+  <form action="/" method="get">
+    <input type="submit" value="Back to the button" />
+  </form>
+</section>
+
+{% endblock %}
