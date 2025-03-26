@@ -15,6 +15,10 @@ resource "aiven_kafka_connector" "kafka_pg_connector" {
     aiven_pg.pg_button_app,
   ]
 
+  timeouts {
+    default = "5m"
+  }
+
   config = {
     "name"                                                 = "sink_button_presses_avro_karapace"
     "topics"                                               = aiven_kafka_topic.button_app.topic_name
