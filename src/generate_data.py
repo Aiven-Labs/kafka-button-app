@@ -9,6 +9,7 @@ import logging
 import os
 import pathlib
 import random
+import sys
 
 from typing import Iterator, Optional, Any
 
@@ -138,7 +139,6 @@ def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
     logging.info('Left page')
 
 
-
 async def send_messages_to_kafka(
         kafka_uri: str,
         certs_dir: pathlib.Path,
@@ -146,6 +146,7 @@ async def send_messages_to_kafka(
         schema_id: int,
         parsed_schema: avro.schema.RecordSchema,
         geoip: GeoIP2Fast,
+        num_sessions: int,
 ):
     ssl_context = create_ssl_context(
         cafile=certs_dir / "ca.pem",
@@ -162,13 +163,15 @@ async def send_messages_to_kafka(
     await producer.start()
 
     try:
-        for event in generate_session(geoip):
-            # Don't tell the `to_str` method our session id, as we want to see it
-            # printed out (and *of course* it will be "our" session id!)
-            print(event.to_str(''))
-            raw_bytes = make_avro_payload(event, schema_id, parsed_schema)
-            # For the moment, don't let it buffer messages
-            await producer.send_and_wait(topic_name, raw_bytes)
+        for count in range(num_sessions):
+            logging.info(f'Session {count+1} of {num_sessions}')
+            for event in generate_session(geoip):
+                # Don't tell the `to_str` method our session id, as we want to see it
+                # printed out (and *of course* it will be "our" session id!)
+                print(event.to_str(''))
+                raw_bytes = make_avro_payload(event, schema_id, parsed_schema)
+                # For the moment, don't let it buffer messages
+                await producer.send_and_wait(topic_name, raw_bytes)
     finally:
         await producer.stop()
 
@@ -190,6 +193,16 @@ def main():
         help='the URI for the Karapace schema registry, defaulting to'
         ' $SCHEMA_REGISTRY_URI if that is set',
         )
+    parser.add_argument(
+        '--forever', action='store_true',
+        help='generate fake "sessions" \'forever\''
+        f' (actually equivalent to `--num-sessions {sys.maxsize}`)'
+        )
+    parser.add_argument(
+        '-n', '--num-sessions', type=int, default=1,
+        help='the URI for the Karapace schema registry, defaulting to'
+        ' $SCHEMA_REGISTRY_URI if that is set',
+        )
 
     args = parser.parse_args()
 
@@ -207,6 +220,11 @@ def main():
         logging.error('Set SCHEMA_REGISTRY_URI or use the -s switch')
         return -1
 
+    if args.num_sessions <= 0:
+        print(f'The `--num-sessions` argument must be 1 or more, not {args.num_sessions}')
+        logging.error(f'The `--num-sessions` argument must be 1 or more, not {args.sessions}')
+        return -1
+
     geoip = load_geoip_data()
 
     schema = create_avro_schema(TOPIC_NAME)
@@ -217,9 +235,14 @@ def main():
 
     schema_id = register_avro_schema(args.schema_uri, TOPIC_NAME, schema)
 
+    if args.forever:
+        args.num_sessions = sys.maxsize
+
     with asyncio.Runner() as runner:
-        runner.run(send_messages_to_kafka(
-            args.kafka_uri, args.certs_dir, TOPIC_NAME, schema_id, parsed_schema, geoip,
+        runner.run(
+            send_messages_to_kafka(
+                args.kafka_uri, args.certs_dir, TOPIC_NAME, schema_id, parsed_schema, geoip,
+                args.num_sessions,
             ),
         )
 
