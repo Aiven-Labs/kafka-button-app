@@ -60,6 +60,8 @@ dotenv.load_dotenv()
 KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI", "localhost:9093")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
+# Default max presses per session
+DEFAULT_MAX_PRESSES = 10
 
 # A `cohort` value of None means that the data comes from this data generator
 FAKE_DATA_COHORT = None
@@ -80,9 +82,15 @@ class FakeEventCreator:
           generator script.
         """
         self.geoip = geoip
-        self.now = datetime.datetime.now(datetime.timezone.utc)
         self.cookie = new_cookie(geoip, self.get_fake_ip_address, cohort=cohort)
         logging.info(f'New "session" {self.cookie}')
+
+        # We work out the *real* now, but then fuzz it a bit so that
+        # successive fake sessions don't follow each other in a linear
+        # sequence
+        self.now = datetime.datetime.now(datetime.timezone.utc)
+        fuzz = datetime.timedelta(seconds=random.randint(-2*60, 0))
+        self.now += fuzz
 
     def get_fake_ip_address(self, request: Any) -> str:
         """This fake IP address creator doesn't need a "Request" parameter.
@@ -115,7 +123,7 @@ class FakeEventCreator:
         return self.new_event(Action.PRESS_BUTTON, elapsed_ms)
 
 
-def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
+def generate_session(geoip: GeoIP2Fast, max_presses: int) -> Iterator[Event]:
     """Yield button press message tuples from a single web app "session"
 
     Note we do *not* expose the IP address, as that counts as personal information.
@@ -131,7 +139,7 @@ def generate_session(geoip: GeoIP2Fast) -> Iterator[Event]:
     yield event_creator.enter_page(0)
 
     # Luckily we're not trying to be especially random, so this is good enough
-    number_presses = random.randint(1, 10)
+    number_presses = random.randint(1, max_presses)
     for press in range(number_presses):
         elapsed_ms = random.randint(500, 5000)
         yield event_creator.press_button(elapsed_ms)
@@ -147,6 +155,7 @@ async def send_messages_to_kafka(
         parsed_schema: avro.schema.RecordSchema,
         geoip: GeoIP2Fast,
         num_sessions: int,
+        max_presses: int,
 ):
     ssl_context = create_ssl_context(
         cafile=certs_dir / "ca.pem",
@@ -165,7 +174,7 @@ async def send_messages_to_kafka(
     try:
         for count in range(num_sessions):
             logging.info(f'Session {count+1} of {num_sessions}')
-            for event in generate_session(geoip):
+            for event in generate_session(geoip, max_presses):
                 # Don't tell the `to_str` method our session id, as we want to see it
                 # printed out (and *of course* it will be "our" session id!)
                 print(event.to_str(''))
@@ -202,6 +211,10 @@ def main():
         '-n', '--num-sessions', type=int, default=1,
         help='the URI for the Karapace schema registry, defaulting to'
         ' $SCHEMA_REGISTRY_URI if that is set',
+        )
+    parser.add_argument(
+        '-p', '--max-presses', type=int, default=DEFAULT_MAX_PRESSES,
+        help=f'the maximum button presses per session, default {DEFAULT_MAX_PRESSES}'
         )
 
     args = parser.parse_args()
@@ -242,7 +255,7 @@ def main():
         runner.run(
             send_messages_to_kafka(
                 args.kafka_uri, args.certs_dir, TOPIC_NAME, schema_id, parsed_schema, geoip,
-                args.num_sessions,
+                args.num_sessions, args.max_presses,
             ),
         )
 
