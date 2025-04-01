@@ -320,7 +320,8 @@ async def get_ch_stats(request: Request):
         "session_id": cookie_dict["session_id"],
     }
     result = await lifespan_data.ch_client.command(
-        "SELECT COUNT(*) FROM {table:Identifier} WHERE session_id = {session_id:String}",
+        "SELECT COUNT(*) FROM {table:Identifier}"
+        " WHERE session_id = {session_id:String} AND action == 'PressButton'",
         parameters=parameters,
     )
     count_for_this_session = result
@@ -330,7 +331,8 @@ async def get_ch_stats(request: Request):
         "country_name": cookie_dict["country_name"],
     }
     result = await lifespan_data.ch_client.command(
-        "SELECT COUNT(*) FROM {table:Identifier} WHERE country_name = {country_name:String}",
+        "SELECT COUNT(*) FROM {table:Identifier}"
+        " WHERE country_name = {country_name:String} AND action == 'PressButton'",
         parameters=parameters,
     )
     count_for_this_country = result
@@ -346,7 +348,9 @@ async def get_ch_stats(request: Request):
     }
     result = await lifespan_data.ch_client.command(
         "SELECT COUNT(*) FROM {table:Identifier}"
-        " WHERE country_name = {country_name:String} AND timestamp > {one_hour_ago:DateTime64(6,'UTC')}",
+        " WHERE country_name = {country_name:String}"
+        " AND action == 'PressButton'"
+        " AND timestamp > {one_hour_ago:DateTime64(6,'UTC')}",
         parameters=parameters,
     )
     count_for_this_hour = result
