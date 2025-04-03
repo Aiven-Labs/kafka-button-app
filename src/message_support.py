@@ -229,10 +229,6 @@ def register_avro_schema(schema_uri: str, topic_name: str, schema_as_str: str) -
     return response_json['id']
 
 
-def lookup_avro_schema(schema_uri: str, topic_name: str, schema_id: int) -> str:
-    """Look up the schema in Karapace"""
-
-
 def make_avro_payload(
         event: Event,
         schema_id: int,
@@ -273,10 +269,24 @@ def make_avro_payload(
 
     return raw_bytes
 
+
+def lookup_avro_schema(schema_uri: str, schema_id: int) -> avro.schema.RecordSchema:
+    """Look up the schema in Karapace"""
+    logging.info(f'Looking up schema {schema_id}')
+    r = httpx.get(f'{schema_uri}/schemas/ids/{schema_id}')
+    r.raise_for_status()
+    logging.info(f'Response is {r}')
+
+    schema_as_str = r.text
+
+    avro_schema = json.loads(schema_as_str)
+    return get_parsed_avro_schema(avro_schema['schema'])
+
+
 async def unpack_avro_payload(
         message: bytes,
         schema_uri: str,
-        cached_schema: dict[int: str],
+        cached_schema: dict[int: avro.schema.RecordSchema],
 ) -> Event:
     """Given an Avro message, look up the schema and unpack it.
 
@@ -300,18 +310,9 @@ async def unpack_avro_payload(
     if schema_id in cached_schema:
         parsed_schema = cached_schema[schema_id]
     else:
-        logging.info(f'Looking up schema {schema_id}')
-        r = httpx.get(f'{schema_uri}/schemas/ids/{schema_id}')
-        r.raise_for_status()
-        logging.info(f'Response is {r}')
-
-        schema_as_str = r.text
-
-        avro_schema = json.loads(schema_as_str)
-        parsed_schema = get_parsed_avro_schema(avro_schema['schema'])
+        parsed_schema = lookup_avro_schema(schema_uri, schema_id)
         # Remember it for later
         cached_schema[schema_id] = parsed_schema
-
 
     message_data = io.BytesIO(message[5:])
 
