@@ -4,6 +4,8 @@ certs/
 *.json
 # Our city data file
 geoip2fast-city-ipv6.dat.gz
+# Our new env file
+create_services.env
 
 # A locally installed clickhouse binary
 clickhouse
