@@ -138,17 +138,30 @@ avn service update                  \
    $KAFKA_SERVICE_NAME              \
    -c tiered_storage.enabled=true
 
-# TODO I hope there's a better way to do this :)
-echo "Pause to let that happen..."
+# Wait until it is enabled
+echo "Wait for tiered storage to be enabled"
+echo "Is it enabled alredy? $(avn service get kafka-button-app-kafka --json | jq -r '.user_config.tiered_storage.enabled')"
+while [ "$(avn service get kafka-button-app-kafka --json | jq -r '.user_config.tiered_storage.enabled')" != "true" ]
+do
+    echo "Waiting for tiered storage to be enabled"
+done
+
+# Somehow, that's not enough - I still get
+#   "Cannot enable remote storage when service does not have tiered storage enabled"
+# so let's add a pause as well
+echo "Pause for safety (?)"
 sleep 5
 
 # TODO parameterise the various numeric arguments
+# Note that these values are deliberately chosen to be low for demonstration purposes
+# - we want to illustrate tiered storage being used!
 echo "Create topic $TOPIC_NAME"
 avn service topic-create    \
    --partitions 3            \
    --replication 2           \
    --remote-storage-enable   \
-   --local-retention-ms 5000 \
+   --local-retention-ms 500 \
+   --local-retention-bytes 500 \
    $KAFKA_SERVICE_NAME $TOPIC_NAME
 
 # TODO parameterise the cloud and plan
@@ -298,10 +311,13 @@ CH_PASSWORD=$(avn service get $CH_SERVICE_NAME --json | jq -r .service_uri_param
 CH_HOST=$(avn service get $CH_SERVICE_NAME --json | jq -r .service_uri_params.host)
 CH_PORT=$(avn service get $CH_SERVICE_NAME --json | jq -r .service_uri_params.port)
 
-echo "Create the ClickHouse target table and materialized view"
+# Do the following in two actions to see if that gives time for the table
+# to "take" before doing the subsequent command
 
-clickhouse_query_file=$temp_dir/clickhouse_query.sql
-cat <<EOF > ${clickhouse_query_file}
+echo "Create the ClickHouse target table"
+
+clickhouse_create_button_presses=$temp_dir/clickhouse_create_button_presses.sql
+cat <<EOF > ${clickhouse_create_button_presses}
 CREATE TABLE button_presses (
     session_id UUID,
     timestamp DateTime('UTC'),
@@ -315,19 +331,35 @@ CREATE TABLE button_presses (
 )
 ENGINE = ReplicatedMergeTree
 ORDER BY timestamp;
-CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
-SELECT * FROM \`service_${KAFKA_SERVICE_NAME}\`.${TOPIC_NAME}_from_kafka;
 EOF
 
 echo "SQL created:"
-cat $clickhouse_query_file
+cat $clickhouse_create_button_presses
 echo "End of SQL"
 
 clickhouse client \
     --host $CH_HOST --port $CH_PORT \
     --user $CH_USER --password $CH_PASSWORD \
     --secure \
-    --queries-file $clickhouse_query_file
+    --queries-file $clickhouse_create_button_presses
+
+echo "Create the ClickHouse materialized view"
+
+clickhouse_create_materialized_view=$temp_dir/clickhouse_create_materialized_view.sql
+cat <<EOF > ${clickhouse_create_materialized_view}
+CREATE MATERIALIZED VIEW materialised_view TO button_presses AS
+SELECT * FROM \`service_${KAFKA_SERVICE_NAME}\`.${TOPIC_NAME}_from_kafka;
+EOF
+
+echo "SQL created:"
+cat $clickhouse_create_materialized_view
+echo "End of SQL"
+
+clickhouse client \
+    --host $CH_HOST --port $CH_PORT \
+    --user $CH_USER --password $CH_PASSWORD \
+    --secure \
+    --queries-file $clickhouse_create_materialized_view
 
 # Leave behind a record of all the useful environment variables
 # Note that this overwrites any previous value *unless* the Bash
@@ -349,4 +381,6 @@ CH_USER=$CH_USER
 CH_PASSWORD=$CH_PASSWORD
 CH_HOST=$CH_HOST
 CH_PORT=$CH_PORT
+# ClickHouse client connection command:
+#  clickhouse client --host $CH_HOST --port $CH_PORT --user $CH_USER --password $CH_PASSWORD --secure
 EOF
