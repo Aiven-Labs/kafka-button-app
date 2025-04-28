@@ -1,8 +1,8 @@
 resource "aiven_kafka" "kafka_button_app" {
-  project      = data.aiven_project.button_app.project
+  project      = var.aiven_project_name
   service_name = "kafka-button-app-${random_string.suffix.result}"
   cloud_name   = var.cloud_name
-  plan         = "business-4"
+  plan         = var.kafka_plan
 
   kafka_user_config {
     kafka_rest      = true
@@ -28,7 +28,7 @@ resource "aiven_kafka" "kafka_button_app" {
 }
 
 resource "aiven_kafka_topic" "button_app" {
-  project                = data.aiven_project.button_app.project
+  project                = var.aiven_project_name
   service_name           = aiven_kafka.kafka_button_app.service_name
   topic_name             = "button_presses"
   partitions             = 3

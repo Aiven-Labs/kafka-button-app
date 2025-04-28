@@ -1,44 +1,40 @@
-# Pushing this button does nothing (really)
+# Pushing this button does nothing
 
-A fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka, and from there to PostgreSQL and/or ClickHouse.
+This is a fun interactive web application built with FastAPI that sends user click interactions to Apache Kafka, and from there to PostgreSQL and/or ClickHouse.
 
-If you want to play along, instructions are in [summary.md](summary.md). The intent is to fold them into this README at a later stage.
+## Deploy Aiven Services
 
-Development notes are in the [working-document.md](working-document.md) file, and will act as the basis for actual documentation.
+This project Kafka for data streaming with records being stored in PostgreSQL and ClickHouse. Using Aiven and [Terraform](https://www.terraform.io/)/[OpenTofu](https://opentofu.org/).
 
-## Overview
+You will need to provide the following information to build your services with terraform.
 
-This project is a demonstration application for the Aiven for Apache Kafka
-Workshop. It presents users with a button that claims to do nothing, then
-captures and streams interaction data to Kafka when they inevitably push it.
+## Est. Monthly Pricing
+
+| service      | plan       | cost (google-europe-east1) | cost (google-europe-west2) |
+| ------------ | ---------- | -------------------------- | -------------------------- |
+| Apache Kafka | Business-4 | $500                       | $660                       |
+| ClickHouse   | Startup-16 | $480                       | $590                       |
+| PostgreSQL   | Startup-1  | $25                        | $25                        |
 
 ## Features
 
-- Interactive web interface with a tempting button
-- Geo-location tracking of user clicks
+- Aggregation of users by country (ip-based) all done on platform with no ip information stored.
 - Real-time data streaming to Apache Kafka
-  - and from there into PostgreSQL and ClickHouse
-- HTMX for dynamic UI updates without page reloads
+- HTMX to send user interactions updates without page reloads.
 - Random humorous responses when the button is clicked
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 
 We'll explain how to set up the necessary services:
-
-- An [Aiven for Apache Kafka](https://aiven.io/kafka) service
-- Optionally, an [Aiven for PostgreSQL®](https://aiven.io/postgresql) service
-- Optionally, an [Aiven for ClickHouse®](https://aiven.io/clickhouse) service
-
-and how to use the button app, and/or generate fake data.
 
 ## Installation
 
 1. Clone the repository:
 
    ```
-   git clone https://github.com/yourusername/dont-push-the-button.git
+   git clone https://github.com/<YOURUSERNAME>/dont-push-the-button.git
    cd dont-push-the-button
    ```
 
@@ -68,6 +64,7 @@ kafka-button-app/
 ├─summary.md
 ├─templates/
 │ ├─index.html
+
 │ └─partials/
 │   └─button_text.html
 └─working-document.md
