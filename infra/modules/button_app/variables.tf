@@ -16,11 +16,11 @@ variable "cloud_name" {
 variable "kafka_plan" {
   description = "How much you trying to spend????"
   type        = string
-  default     = "Business-4"
+  default     = "business-4"
 }
 
 variable "pg_version" {
   description = "What Version"
   type        = string
-  default     = "16.8"
+  default     = "17"
 }

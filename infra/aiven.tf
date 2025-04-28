@@ -9,16 +9,14 @@ module "aiven_services_dev" {
   aiven_api_token    = var.aiven_api_token
   aiven_project_name = var.aiven_project_name
   cloud_name         = var.cloud_name
-  pg_version         = "17.0"
+  pg_version         = "17"
 
 }
 
-module "aiven_services_prod" {
-  source = "./modules/button_app/"
+output "clickhouse_service_name" {
+  value = module.aiven_services_dev.clickhouse_service_name
+}
 
-  # Required parameters
-  aiven_api_token    = var.aiven_api_token
-  aiven_project_name = var.aiven_project_name
-  cloud_name         = "aws-us-east-1"
-
+output "kafka_service_name" {
+  value = module.aiven_services_dev.kafka_service_name
 }
