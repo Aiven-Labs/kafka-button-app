@@ -67,8 +67,11 @@ SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
 # The ClickHouse connection information, for the `stats` page
 CH_HOST = os.getenv("CH_HOST")
-CH_PORT = int(os.getenv("CH_PORT"))  # this will be nasty if it's unset :(
-CH_USERNAME = os.getenv("CH_USERNAME")
+
+# PORT is the HTTPS Port
+# same as avn service get $CLICKHOUSE_SERVICE_NAME --json | jq '.components[] | select(.component == "clickhouse_https")'.port
+CH_PORT = int(os.getenv("CH_HTTPS_PORT"))  # this will be nasty if it's unset :(
+CH_USERNAME = os.getenv("CH_USER")
 CH_PASSWORD = os.getenv("CH_PASSWORD")
 CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", "button_presses")
 
@@ -178,7 +181,7 @@ def get_ip_address(request: Request) -> str:
         # Because localhost isn't much fun...
         ip_address = lifespan_data.geoip.generate_random_ipv4_address()
         logging.info(
-            f"We're at 1227.0.0.1 which is boring; pretending to be at {ip_address}"
+            f"We're at 127.0.0.1 which is boring; pretending to be at {ip_address}"
         )
     return ip_address
 

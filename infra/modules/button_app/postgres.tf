@@ -8,3 +8,9 @@ resource "aiven_pg" "pg_button_app" {
     pg_version = var.pg_version
   }
 }
+
+output "PG_SERVICE_URI" {
+  description = "the service uri for the aiven for postgresql instance"
+  value       = aiven_pg.pg_button_app.service_uri
+  sensitive   = true
+}

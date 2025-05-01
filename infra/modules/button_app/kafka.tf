@@ -33,7 +33,7 @@ resource "aiven_kafka_topic" "button_app" {
   topic_name             = "button_presses"
   partitions             = 3
   replication            = 2
-  termination_protection = true
+  termination_protection = false
 
   config {
     cleanup_policy        = "delete"
@@ -49,4 +49,18 @@ resource "aiven_kafka_topic" "button_app" {
 
 output "kafka_service_name" {
   value = aiven_kafka.kafka_button_app.service_name
+}
+
+output "kafka_service_uri" {
+  value     = aiven_kafka.kafka_button_app.service_uri
+  sensitive = true
+}
+
+output "kafka_schema_registry_uri" {
+  value     = aiven_kafka.kafka_button_app.kafka[0].schema_registry_uri
+  sensitive = true
+}
+
+output "kafka_topic" {
+  value = aiven_kafka_topic.button_app.topic_name
 }
