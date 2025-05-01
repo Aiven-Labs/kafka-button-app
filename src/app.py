@@ -11,28 +11,24 @@ The following must be provided, either as environment variables or in a `.env` f
 """
 
 import datetime
-import json
 import logging
 import os
 import pathlib
 import random
 
 from contextlib import asynccontextmanager
-from typing import Optional, Any
+from typing import Optional
 
 import avro.schema
 import clickhouse_connect
 import dotenv
-import httpx
 
 from aiokafka import AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from geoip2fast import GeoIP2Fast
-from pydantic import BaseModel
 from pydantic import ValidationError
 
 from .button_responses import BUTTON_RESPONSES

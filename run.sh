@@ -36,10 +36,10 @@ export SCHEMA_REGISTRY_URI=$(avn --auth-token "$AIVEN_TOKEN" service get \
 export CH_HOST=$(avn --auth-token "$AIVEN_TOKEN" service get \
   --project $PROJECT_NAME \
   $CH_SERVICE_NAME --json | jq -r '.components | map(select(.component == "clickhouse_https"))[0].host')
-export CH_PORT=$(avn --auth-token "$AIVEN_TOKEN" service get \
+export CH_HTTPS_PORT=$(avn --auth-token "$AIVEN_TOKEN" service get \
   --project $PROJECT_NAME \
   $CH_SERVICE_NAME --json | jq -r '.components | map(select(.component == "clickhouse_https"))[0].port')
-export CH_USERNAME=$(avn --auth-token "$AIVEN_TOKEN" service get \
+export CH_USER=$(avn --auth-token "$AIVEN_TOKEN" service get \
   --project $PROJECT_NAME \
   $CH_SERVICE_NAME --json | jq -r '.service_uri_params.user')
 export CH_PASSWORD=$(avn --auth-token "$AIVEN_TOKEN" service get \
