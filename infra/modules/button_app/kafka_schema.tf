@@ -1,5 +1,5 @@
 resource "aiven_kafka_schema" "button-app-schema" {
-  project             = data.aiven_project.button_app.project
+  project             = var.aiven_project_name
   service_name        = aiven_kafka.kafka_button_app.service_name
   subject_name        = "button-app-schema1"
   compatibility_level = "FORWARD"

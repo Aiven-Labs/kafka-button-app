@@ -1,8 +1,8 @@
 resource "aiven_kafka" "kafka_button_app" {
-  project      = data.aiven_project.button_app.project
+  project      = var.aiven_project_name
   service_name = "kafka-button-app-${random_string.suffix.result}"
   cloud_name   = var.cloud_name
-  plan         = "business-4"
+  plan         = var.kafka_plan
 
   kafka_user_config {
     kafka_rest      = true
@@ -28,12 +28,12 @@ resource "aiven_kafka" "kafka_button_app" {
 }
 
 resource "aiven_kafka_topic" "button_app" {
-  project                = data.aiven_project.button_app.project
+  project                = var.aiven_project_name
   service_name           = aiven_kafka.kafka_button_app.service_name
   topic_name             = "button_presses"
   partitions             = 3
   replication            = 2
-  termination_protection = true
+  termination_protection = false
 
   config {
     cleanup_policy        = "delete"
@@ -49,4 +49,18 @@ resource "aiven_kafka_topic" "button_app" {
 
 output "kafka_service_name" {
   value = aiven_kafka.kafka_button_app.service_name
+}
+
+output "kafka_service_uri" {
+  value     = aiven_kafka.kafka_button_app.service_uri
+  sensitive = true
+}
+
+output "kafka_schema_registry_uri" {
+  value     = aiven_kafka.kafka_button_app.kafka[0].schema_registry_uri
+  sensitive = true
+}
+
+output "kafka_topic" {
+  value = aiven_kafka_topic.button_app.topic_name
 }

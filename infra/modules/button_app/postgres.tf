@@ -1,0 +1,16 @@
+resource "aiven_pg" "pg_button_app" {
+  project      = var.aiven_project_name
+  cloud_name   = var.cloud_name
+  plan         = "hobbyist"
+  service_name = "pg-button-app-${random_string.suffix.result}"
+
+  pg_user_config {
+    pg_version = var.pg_version
+  }
+}
+
+output "PG_SERVICE_URI" {
+  description = "the service uri for the aiven for postgresql instance"
+  value       = aiven_pg.pg_button_app.service_uri
+  sensitive   = true
+}

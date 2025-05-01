@@ -4,7 +4,7 @@ locals {
 }
 
 resource "aiven_kafka_connector" "kafka_pg_connector" {
-  project        = data.aiven_project.button_app.project
+  project        = var.aiven_project_name
   service_name   = aiven_kafka.kafka_button_app.service_name
   connector_name = "sink_button_presses_avro_karapace"
 
