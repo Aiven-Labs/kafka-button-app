@@ -24,3 +24,9 @@ variable "pg_version" {
   type        = string
   default     = "17"
 }
+
+variable "tag_application_value" {
+  description = "what tag value for the key 'application' would you like to apply"
+  type        = string
+  default     = "button-app"
+}

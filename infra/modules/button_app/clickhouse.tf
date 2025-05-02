@@ -3,6 +3,11 @@ resource "aiven_clickhouse" "ch_button_app" {
   cloud_name   = var.cloud_name
   plan         = "startup-16"
   service_name = "ch-button-app-${random_string.suffix.result}"
+
+  tag {
+    key   = "application"
+    value = var.tag_application_value
+  }
 }
 
 
