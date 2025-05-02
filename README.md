@@ -57,6 +57,13 @@ You will need to provide the following information to build your services with t
   PROJECT_NAME=$TF_VAR_aiven_project_name
   ```
 
+- before the first time you run `terraform plan` or `terraform apply`,
+  you need to initialize (make sure you point to the `infra` directory)
+
+  ```shell
+  terraform -chdir=infra init
+  ```
+
 - terraform plan/apply (make sure you point to the `infra` directory)
 
   ```shell
@@ -70,6 +77,8 @@ You will need to provide the following information to build your services with t
 
   ```shell
   ./setup_scripts/create_env_file.sh
+  ```
+  ```shell
   source terraform_env.sh
   ```
 
@@ -77,6 +86,8 @@ You will need to provide the following information to build your services with t
 
   ```shell
   ./setup_scripts/create_pg_tables.sh
+  ```
+  ```shell
   ./setup_scripts/create_clickhouse_tables.sh
   ```
 
@@ -84,8 +95,18 @@ You will need to provide the following information to build your services with t
 
   ```shell
   python -m venv venv
+  ```
+  ```shell
   source venv/bin/activate  # On Windows: venv\Scripts\activate
+  ```
+  ```shell
   pip install -r requirements.txt
+  ```
+
+- Download the certificates needed to talk to Kafka
+
+  ```shell
+  avn service user-creds-download $KAFKA_SERVICE_NAME --username avnadmin -d certs
   ```
 
 - start fastAPI
