@@ -61,6 +61,8 @@ You will need to provide the following information to build your services with t
 
   ```shell
   terraform -chdir=infra plan
+  ```
+  ```shell
   terraform -chdir=infra apply -auto-approve
   ```
 
