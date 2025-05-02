@@ -17,7 +17,7 @@ import pathlib
 import random
 
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Union
 
 import avro.schema
 import clickhouse_connect
@@ -33,6 +33,8 @@ from pydantic import ValidationError
 
 from .button_responses import BUTTON_RESPONSES
 
+from .db_queries import ClickhouseDBQueries
+
 from .message_support import DEFAULT_TOPIC_NAME as TOPIC_NAME
 from .message_support import Cookie
 from .message_support import Action
@@ -43,6 +45,7 @@ from .message_support import create_avro_schema
 from .message_support import get_parsed_avro_schema
 from .message_support import register_avro_schema
 from .message_support import make_avro_payload
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -61,16 +64,6 @@ dotenv.load_dotenv()
 KAFKA_SERVICE_URI = os.getenv("KAFKA_SERVICE_URI")
 SCHEMA_REGISTRY_URI = os.getenv("SCHEMA_REGISTRY_URI", None)
 
-# The ClickHouse connection information, for the `stats` page
-CH_HOST = os.getenv("CH_HOST")
-
-# PORT is the HTTPS Port
-# same as avn service get $CLICKHOUSE_SERVICE_NAME --json | jq '.components[] | select(.component == "clickhouse_https")'.port
-CH_PORT = int(os.getenv("CH_HTTPS_PORT"))  # this will be nasty if it's unset :(
-CH_USERNAME = os.getenv("CH_USER")
-CH_PASSWORD = os.getenv("CH_PASSWORD")
-CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", "button_presses")
-
 CERTS_FOLDER = pathlib.Path("certs")
 
 COOKIE_NAME = "button_press_session"
@@ -83,13 +76,30 @@ DEFAULT_COHORT = 0
 FAKE_IP_IF_LOCALHOST = True
 
 
+# Checks if all the values are available
+CLICKHOUSE_VARS = ["CH_HOST", "CH_PORT", "CH_USER", "CH_PASSWORD"]
+
+all_ch_values = all(ch_value in os.environ for ch_value in CLICKHOUSE_VARS)
+
+if all_ch_values:
+    # The ClickHouse connection information, for the `stats` page
+    CH_HOST = os.getenv("CH_HOST", None)
+    CH_PORT = int(os.getenv("CH_HTTPS_PORT"))  # this will be nasty if it's unset :(
+    CH_USERNAME = os.getenv("CH_USER")
+    CH_PASSWORD = os.getenv("CH_PASSWORD")
+    CH_TABLE_NAME = os.getenv("CH_TABLE_NAME", "button_presses")
+
+elif any(ch_value in os.environ for ch_value in CLICKHOUSE_VARS):
+    logging.warning("Not all cLICKHOUSE vars detected")
+
+
 class LifespanData:
     producer: AIOKafkaProducer
     geoip: GeoIP2Fast
     avro_schema: str
     parsed_avro_schema: avro.schema.RecordSchema
     avro_schema_id: int
-    ch_client: Optional[clickhouse_connect.driver.AsyncClient]
+    stats_client: clickhouse_connect.driver.AsyncClient
 
 
 lifespan_data = LifespanData()
@@ -145,7 +155,16 @@ async def lifespan(app: FastAPI):
     lifespan_data.geoip = load_geoip_data()
     setup_avro_schema()
     lifespan_data.producer = await start_producer()
-    lifespan_data.ch_client = await get_ch_client()
+
+    if all_ch_values:
+        client = await get_ch_client()
+        lifespan_data.stats_client = ClickhouseDBQueries(
+            client=client, table_name=CH_TABLE_NAME
+        )
+
+    else:
+        raise ValueError("No Database Detected. Please provide environment vars")
+
     yield
     await lifespan_data.producer.stop()
 
@@ -306,53 +325,35 @@ async def send_event(request: Request):
 
 @app.get("/stats", response_class=HTMLResponse)
 async def get_ch_stats(request: Request):
-    """Report statistics from ClickHouse."""
+    """Report statistics from Database ClickHouse."""
 
-    logging.info("HI HI ClickHouse stats page")
+    logging.info("ClickHouse stats page")
     logging.info(f"request.cookies {request.cookies}")
 
     cookie = get_cookie_from_request(request)
     cookie_dict = dict(cookie)
+    logging.warning(f"request.cookies_dict {cookie_dict}")
 
-    parameters = {
-        "table": CH_TABLE_NAME,
-        "session_id": cookie_dict["session_id"],
-    }
-    result = await lifespan_data.ch_client.command(
-        "SELECT COUNT(*) FROM {table:Identifier}"
-        " WHERE session_id = {session_id:String} AND action == 'PressButton'",
-        parameters=parameters,
+    count_for_this_session = await lifespan_data.stats_client.count_for_this_session(
+        session_id=cookie_dict["session_id"],
     )
-    count_for_this_session = result
 
-    parameters = {
-        "table": CH_TABLE_NAME,
-        "country_name": cookie_dict["country_name"],
-    }
-    result = await lifespan_data.ch_client.command(
-        "SELECT COUNT(*) FROM {table:Identifier}"
-        " WHERE country_name = {country_name:String} AND action == 'PressButton'",
-        parameters=parameters,
+    count_for_this_country = (
+        await lifespan_data.stats_client.count_for_this_country_all_time(
+            country_name=cookie_dict["country_name"],
+        )
     )
-    count_for_this_country = result
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     one_hour_ago = now_utc - datetime.timedelta(hours=1)
     microseconds_since_epoch = int(one_hour_ago.timestamp() * 1000_000)
 
-    parameters = {
-        "table": CH_TABLE_NAME,
-        "country_name": cookie_dict["country_name"],
-        "one_hour_ago": microseconds_since_epoch,
-    }
-    result = await lifespan_data.ch_client.command(
-        "SELECT COUNT(*) FROM {table:Identifier}"
-        " WHERE country_name = {country_name:String}"
-        " AND action == 'PressButton'"
-        " AND timestamp > {one_hour_ago:DateTime64(6,'UTC')}",
-        parameters=parameters,
+    count_for_this_hour = (
+        await lifespan_data.stats_client.count_for_this_country_last_hour(
+            country_name=cookie_dict["country_name"],
+            last_hour=microseconds_since_epoch,
+        )
     )
-    count_for_this_hour = result
 
     context = {
         "request": request,
