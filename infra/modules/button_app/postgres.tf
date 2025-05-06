@@ -4,6 +4,11 @@ resource "aiven_pg" "pg_button_app" {
   plan         = "hobbyist"
   service_name = "pg-button-app-${random_string.suffix.result}"
 
+  tag {
+    key   = "application"
+    value = var.tag_application_value
+  }
+
   pg_user_config {
     pg_version = var.pg_version
   }

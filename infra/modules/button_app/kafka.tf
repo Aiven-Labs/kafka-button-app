@@ -3,12 +3,18 @@ resource "aiven_kafka" "kafka_button_app" {
   service_name = "kafka-button-app-${random_string.suffix.result}"
   cloud_name   = var.cloud_name
   plan         = var.kafka_plan
+  tag {
+    key   = "application"
+    value = var.tag_application_value
+  }
 
   kafka_user_config {
     kafka_rest      = true
     kafka_connect   = true
     schema_registry = true
     kafka_version   = "3.8"
+
+
 
     tiered_storage {
       enabled = true
