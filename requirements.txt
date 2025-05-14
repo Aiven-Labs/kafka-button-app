@@ -1,8 +1,8 @@
-aiven_client
+aiven-client
 fastapi[standard]
 aiokafka
-python_dotenv
+python-dotenv
 geoip2fast
 avro
 httpx
-clickhouse_connect
+clickhouse-connect

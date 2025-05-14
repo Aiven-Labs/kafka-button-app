@@ -1,0 +1,23 @@
+<section id="stats">
+  <h1 class="text-3xl font-extrabold dark:text-white mb-4">Statistics</h1>
+
+  <div class="flex flex-col space-y-4">
+    <p>Current session is <tt>{{cookie.to_str()}}</tt></p>
+    <p>Number of button presses for:</p>
+  </div>
+
+  <ul class="list-inside list-disc">
+    <li>Current session is {{count_for_this_session}}</li>
+    <li>{{cookie_dict['country_name']}} is {{count_country_all_time}}</li>
+    <li>
+      {{cookie_dict['country_name']}} in the last hour is
+      {{count_country_last_hour}}
+    </li>
+  </ul>
+</section>
+
+<script>
+  // Force a complete update of the map data with the latest country counts
+  country_count = {{count_by_country | tojson}};
+  updateMapData();
+</script>
