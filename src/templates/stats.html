@@ -1,19 +1,15 @@
 {% extends 'base.html' %} {% block content %}
-<section>
-
-  <h1 class="text-3xl font-extrabold dark:text-white mb-4">Statistics</h1>
-
-  <div class="flex flex-col space-y-4">
-  <p>Current session is <tt>{{cookie.to_str()}}</tt></p>
-  <p>Number of button presses for:</p>
-  </div>
-
-  <!--  <ul class="list-disc list-inside space-y-4"> -->
-  <ul class="list-inside list-disc">
-  <li>Current session is {{count_for_this_session}}
-  <li>{{cookie_dict['country_name']}} is {{count_for_this_country}}
-  <li>{{cookie_dict['country_name']}} in the last hour is {{count_for_this_hour}}
-  </ul>
+<section id="map">
+  {% include 'map.html' %} 
 </section>
+<section 
+  hx-get="/load_stats"
+  hx-trigger="every 5s"
+  hx-target="#stats"
+  hx-swap="innerHTML"
+  id="stat_wrapper"
+>
 
+{% include "partials/stats_section.html" %}
+</section>
 {% endblock %}

@@ -28,6 +28,7 @@ from aiokafka.helpers import create_ssl_context
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from geoip2fast import GeoIP2Fast
 from pydantic import ValidationError
 
@@ -177,6 +178,7 @@ app = FastAPI(
 
 # Set up templates
 templates = Jinja2Templates(directory="src/templates")
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 
 def get_client_ip(request: Request) -> str:
@@ -323,46 +325,78 @@ async def send_event(request: Request):
     return response
 
 
-@app.get("/stats", response_class=HTMLResponse)
-async def get_ch_stats(request: Request):
+async def get_stats(
+    session_id: str,
+    country_name: str,
+):
     """Report statistics from Database ClickHouse."""
 
-    logging.info("ClickHouse stats page")
-    logging.info(f"request.cookies {request.cookies}")
-
-    cookie = get_cookie_from_request(request)
-    cookie_dict = dict(cookie)
-    logging.warning(f"request.cookies_dict {cookie_dict}")
-
+    results = await lifespan_data.stats_client.count_by_country()
+    count_by_country = dict(results.result_rows)
     count_for_this_session = await lifespan_data.stats_client.count_for_this_session(
-        session_id=cookie_dict["session_id"],
-    )
-
-    count_for_this_country = (
-        await lifespan_data.stats_client.count_for_this_country_all_time(
-            country_name=cookie_dict["country_name"],
-        )
+        session_id=session_id,
     )
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     one_hour_ago = now_utc - datetime.timedelta(hours=1)
     microseconds_since_epoch = int(one_hour_ago.timestamp() * 1000_000)
 
-    count_for_this_hour = (
-        await lifespan_data.stats_client.count_for_this_country_last_hour(
-            country_name=cookie_dict["country_name"],
-            last_hour=microseconds_since_epoch,
-        )
+    country_stats = await lifespan_data.stats_client.count_single_country(
+        country_name=country_name,
+        last_hour=microseconds_since_epoch,
     )
 
+    count_country_all_time = country_stats[0]
+    count_country_last_hour = country_stats[1]
+
+    return {
+        "count_by_country": count_by_country,
+        "count_country_all_time": count_country_all_time,
+        "count_for_this_session": count_for_this_session,
+        "count_country_last_hour": count_country_last_hour,
+    }
+
+
+@app.get("/stats", response_class=HTMLResponse)
+async def get_country_count(request: Request):
+    """Get a count for all the countries"""
+    cookie = get_cookie_from_request(request)
+    cookie_dict = dict(cookie)
+    stats = await get_stats(
+        session_id=cookie_dict["session_id"],
+        country_name=cookie_dict["country_name"],
+    )
     context = {
         "request": request,
         "cookie": cookie,
         "cookie_dict": cookie_dict,
-        "count_for_this_country": count_for_this_country,
-        "count_for_this_session": count_for_this_session,
-        "count_for_this_hour": count_for_this_hour,
+        **stats,
+    }
+    response = templates.TemplateResponse(
+        "/stats.html",
+        context,
+    )
+
+    return response
+
+
+@app.get("/load_stats", response_class=HTMLResponse)
+async def stat_loader(request: Request):
+    cookie = get_cookie_from_request(request)
+    cookie_dict = dict(cookie)
+    logging.info(f"request.cookies_dict {cookie_dict}")
+
+    logging.info(f"fetching count_by_country")
+    stats = await get_stats(
+        session_id=cookie_dict["session_id"],
+        country_name=cookie_dict["country_name"],
+    )
+    context = {
+        "request": request,
+        "cookie": cookie,
+        "cookie_dict": cookie_dict,
+        **stats,
     }
 
-    response = templates.TemplateResponse("stats.html", context)
+    response = templates.TemplateResponse("partials/stats_section.html", context)
     return response
