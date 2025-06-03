@@ -77,7 +77,7 @@ FAKE_IP_IF_LOCALHOST = True
 
 
 # Checks if all the values are available
-CLICKHOUSE_VARS = ["CH_HOST", "CH_PORT", "CH_USER", "CH_PASSWORD"]
+CLICKHOUSE_VARS = ["CH_HOST", "CH_HTTPS_PORT", "CH_USER", "CH_PASSWORD"]
 
 all_ch_values = all(ch_value in os.environ for ch_value in CLICKHOUSE_VARS)
 
