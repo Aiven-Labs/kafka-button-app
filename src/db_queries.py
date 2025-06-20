@@ -9,11 +9,11 @@ class StatsDBQueries(ABC):
         pass
 
     @abstractmethod
-    def count_for_this_country_all_time(self, country_name: str):
+    def count_single_country(self, country_name: str, last_hour: int):
         pass
 
     @abstractmethod
-    def count_for_this_country_last_hour(self, country_name: str, last_hour: int):
+    def count_by_country(self):
         pass
 
 
@@ -23,7 +23,6 @@ class ClickhouseDBQueries(StatsDBQueries):
         client: clickhouse_connect.driver.AsyncClient,
         table_name: str,
     ):
-
         self.client = client
         self.table_name = table_name
 
@@ -34,22 +33,29 @@ class ClickhouseDBQueries(StatsDBQueries):
             parameters={"session_id": session_id, "table": self.table_name},
         )
 
-    def count_for_this_country_all_time(self, country_name: str):
+    def count_single_country(self, country_name: str, last_hour):
         return self.client.command(
-            "SELECT COUNT(*) FROM {table:Identifier}"
-            " WHERE country_name = {country_name:String} AND action == 'PressButton'",
-            parameters={"country_name": country_name, "table": self.table_name},
-        )
-
-    def count_for_this_country_last_hour(self, country_name: str, last_hour: int):
-        return self.client.command(
-            "SELECT COUNT(*) FROM {table:Identifier}"
+            "SELECT COUNT(*) as total_count,"
+            " SUM(if(timestamp > {last_hour:DateTime64(6,'UTC')}, 1, 0)) as hour_count"
+            " FROM {table:Identifier}"
             " WHERE country_name = {country_name:String}"
-            " AND action == 'PressButton'"
-            " AND timestamp > {last_hour:DateTime64(6,'UTC')}",
+            " AND action == 'PressButton'",
             parameters={
                 "country_name": country_name,
+                "table": self.table_name,
                 "last_hour": last_hour,
+            },
+        )
+
+    def count_by_country(self):
+        """Fetches the list of all countries and their count. Excludes countries that have no representation"""
+        return self.client.query(
+            "SELECT country_name as country, COUNT(*) as click_count"
+            " FROM {table:Identifier}"
+            " WHERE action = 'PressButton'"
+            " GROUP BY country"
+            " ORDER BY click_count DESC;",
+            parameters={
                 "table": self.table_name,
             },
         )

@@ -69,6 +69,7 @@ You will need to provide the following information to build your services with t
   ```shell
   terraform -chdir=infra plan
   ```
+
   ```shell
   terraform -chdir=infra apply -auto-approve
   ```
@@ -78,6 +79,7 @@ You will need to provide the following information to build your services with t
   ```shell
   ./setup_scripts/create_env_file.sh
   ```
+
   ```shell
   source terraform_env.sh
   ```
@@ -87,6 +89,7 @@ You will need to provide the following information to build your services with t
   ```shell
   ./setup_scripts/create_pg_tables.sh
   ```
+
   ```shell
   ./setup_scripts/create_clickhouse_tables.sh
   ```
@@ -96,9 +99,11 @@ You will need to provide the following information to build your services with t
   ```shell
   python -m venv venv
   ```
+
   ```shell
   source venv/bin/activate  # On Windows: venv\Scripts\activate
   ```
+
   ```shell
   pip install -r requirements.txt
   ```
@@ -135,6 +140,10 @@ You will need to provide the following information to build your services with t
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Acknowledgements
+
+The country_to_geojson file is from <https://github.com/eesur/country-codes-lat-long>.
 
 ## License
 
