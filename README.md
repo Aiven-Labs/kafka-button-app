@@ -16,7 +16,7 @@ You will need to provide the following information to build your services with t
 | ------------ | ---------- | ---------------------- | -------------------------- |
 | Apache Kafka | Business-4 | $500                   | $660                       |
 | ClickHouse   | Startup-16 | $480                   | $590                       |
-| PostgreSQL   | Startup-1  | $25                    | $25                        |
+| PostgreSQL   | Startup-4  | $85                    | $85                        |
 
 ## Features
 

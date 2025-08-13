@@ -191,3 +191,6 @@ infra/terraform.tfstate
 .python-version
 infra/.terraform terraform/.terraform.lock.hcl terraform/.terraform.tfstate.lock.info
 terraform_env.sh
+
+# Editors
+.idea/
