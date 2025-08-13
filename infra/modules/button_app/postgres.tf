@@ -1,7 +1,7 @@
 resource "aiven_pg" "pg_button_app" {
   project      = var.aiven_project_name
   cloud_name   = var.cloud_name
-  plan         = "hobbyist"
+  plan         = "startup-4"
   service_name = "pg-button-app-${random_string.suffix.result}"
 
   tag {
